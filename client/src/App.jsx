@@ -1,0 +1,1002 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { io } from "socket.io-client";
+import YouTube from "react-youtube";
+import { extractYouTubeId } from "./utils/youtube";
+import pandaSticker from "./assets/stickers/panda.svg";
+import penguinSticker from "./assets/stickers/penguin.svg";
+
+const SOCKET_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
+const SESSION_STORAGE_KEY = "teleparty_session_v1";
+const LOVE_NAME = "Nunu";
+const STICKERS = [
+  { key: "panda", label: "Panda", src: pandaSticker },
+  { key: "penguin", label: "Penguin", src: penguinSticker },
+];
+const LOVE_PARTICLES = [
+  {
+    id: "heart-1",
+    kind: "heart",
+    left: "6%",
+    size: "1rem",
+    duration: "17s",
+    delay: "-2s",
+    swayMid: "-24px",
+    swayEnd: "12px",
+    opacity: 0.34,
+    color: "rgba(255, 199, 229, 0.62)",
+  },
+  {
+    id: "heart-2",
+    kind: "heart",
+    left: "16%",
+    size: "1.45rem",
+    duration: "15s",
+    delay: "-5s",
+    swayMid: "20px",
+    swayEnd: "-10px",
+    opacity: 0.44,
+    color: "rgba(255, 178, 220, 0.7)",
+  },
+  {
+    id: "tag-1",
+    kind: "tag",
+    label: "Hunu \u2764 Nunu",
+    left: "4%",
+    size: "0.84rem",
+    duration: "23s",
+    delay: "-6s",
+    swayMid: "42vw",
+    swayEnd: "64vw",
+    opacity: 0.52,
+    color: "rgba(255, 220, 241, 0.9)",
+  },
+  {
+    id: "heart-3",
+    kind: "heart",
+    left: "38%",
+    size: "1.18rem",
+    duration: "18s",
+    delay: "-3.5s",
+    swayMid: "-16px",
+    swayEnd: "14px",
+    opacity: 0.36,
+    color: "rgba(255, 191, 226, 0.62)",
+  },
+  {
+    id: "heart-4",
+    kind: "heart",
+    left: "49%",
+    size: "1.74rem",
+    duration: "13s",
+    delay: "-6s",
+    swayMid: "22px",
+    swayEnd: "-16px",
+    opacity: 0.5,
+    color: "rgba(255, 170, 216, 0.75)",
+  },
+  {
+    id: "tag-2",
+    kind: "tag",
+    label: "Nunu \u2764 Hunu",
+    left: "92%",
+    size: "0.82rem",
+    duration: "21s",
+    delay: "-9s",
+    swayMid: "-48vw",
+    swayEnd: "-62vw",
+    opacity: 0.5,
+    color: "rgba(255, 230, 246, 0.9)",
+  },
+  {
+    id: "tag-3",
+    kind: "tag",
+    label: "Hunu \u2764 Nunu",
+    left: "24%",
+    size: "0.8rem",
+    duration: "25s",
+    delay: "-13s",
+    swayMid: "-30vw",
+    swayEnd: "28vw",
+    opacity: 0.44,
+    color: "rgba(255, 212, 237, 0.88)",
+  },
+  {
+    id: "tag-4",
+    kind: "tag",
+    label: "Nunu \u2764 Hunu",
+    left: "70%",
+    size: "0.86rem",
+    duration: "19s",
+    delay: "-4s",
+    swayMid: "36vw",
+    swayEnd: "-22vw",
+    opacity: 0.46,
+    color: "rgba(255, 226, 245, 0.9)",
+  },
+  {
+    id: "heart-5",
+    kind: "heart",
+    left: "74%",
+    size: "1.1rem",
+    duration: "16s",
+    delay: "-7s",
+    swayMid: "18px",
+    swayEnd: "-13px",
+    opacity: 0.38,
+    color: "rgba(255, 204, 232, 0.66)",
+  },
+  {
+    id: "heart-6",
+    kind: "heart",
+    left: "84%",
+    size: "1.9rem",
+    duration: "14s",
+    delay: "-9s",
+    swayMid: "-20px",
+    swayEnd: "11px",
+    opacity: 0.48,
+    color: "rgba(255, 175, 218, 0.74)",
+  },
+  {
+    id: "heart-7",
+    kind: "heart",
+    left: "93%",
+    size: "0.92rem",
+    duration: "19s",
+    delay: "-4s",
+    swayMid: "15px",
+    swayEnd: "-9px",
+    opacity: 0.32,
+    color: "rgba(255, 218, 240, 0.58)",
+  },
+];
+
+const socket = io(SOCKET_URL, {
+  autoConnect: false,
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 800,
+  reconnectionDelayMax: 5000,
+  timeout: 20000,
+  transports: ["websocket", "polling"],
+});
+
+const readStoredSession = () => {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed?.roomId || !parsed?.memberId) return null;
+    return {
+      roomId: String(parsed.roomId).toUpperCase(),
+      memberId: String(parsed.memberId),
+      name: typeof parsed.name === "string" ? parsed.name : "",
+    };
+  } catch (_err) {
+    return null;
+  }
+};
+
+const writeStoredSession = (session) => {
+  if (typeof window === "undefined" || !session?.roomId || !session?.memberId) return;
+  window.localStorage.setItem(
+    SESSION_STORAGE_KEY,
+    JSON.stringify({
+      roomId: session.roomId,
+      memberId: session.memberId,
+      name: session.name || "",
+    })
+  );
+};
+
+const clearStoredSession = () => {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+};
+
+const toComputedPlayback = (playback, syncedAt) => {
+  if (!playback) return null;
+  if (!playback.isPlaying) return playback;
+  const elapsed = Math.max(0, (Date.now() - syncedAt) / 1000);
+  return {
+    ...playback,
+    currentTime: playback.currentTime + elapsed * (playback.playbackRate || 1),
+  };
+};
+
+const formatClock = (seconds) => {
+  const safe = Math.max(0, Math.floor(seconds || 0));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const sec = safe % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${minutes}:${String(sec).padStart(2, "0")}`;
+};
+
+const normalizeProfileName = (name) => {
+  if (!name || typeof name !== "string") return "Guest";
+  const safe = name.trim();
+  if (!safe) return "Guest";
+  return safe.slice(0, 24);
+};
+
+function App() {
+  const storedSession = readStoredSession();
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionLabel, setConnectionLabel] = useState("Connecting...");
+  const [profileName, setProfileName] = useState(() => storedSession?.name || "");
+  const [roomInput, setRoomInput] = useState(() => storedSession?.roomId || "");
+  const [chatInput, setChatInput] = useState("");
+  const [mediaType, setMediaType] = useState("youtube");
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [isMediaPanelOpen, setIsMediaPanelOpen] = useState(() =>
+    typeof window === "undefined" ? true : !window.matchMedia("(max-width: 760px)").matches
+  );
+  const [isFullView, setIsFullView] = useState(false);
+  const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [tick, setTick] = useState(0);
+  const [session, setSession] = useState(null);
+
+  const playerRef = useRef(null);
+  const chatMessagesRef = useRef(null);
+  const suppressLocalSync = useRef(false);
+  const sessionRef = useRef(null);
+  const profileNameRef = useRef(profileName);
+  const restoringRef = useRef(false);
+
+  const computedPlayback = useMemo(() => {
+    if (!session?.playback || !session?.playbackSyncedAt) return null;
+    return toComputedPlayback(session.playback, session.playbackSyncedAt);
+  }, [session?.playback, session?.playbackSyncedAt, tick]);
+
+  useEffect(() => {
+    profileNameRef.current = profileName;
+  }, [profileName]);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
+  useEffect(() => {
+    socket.connect();
+    const manager = socket.io;
+
+    const attemptRestore = () => {
+      const saved =
+        sessionRef.current?.roomId && sessionRef.current?.memberId
+          ? {
+              roomId: sessionRef.current.roomId,
+              memberId: sessionRef.current.memberId,
+              name: sessionRef.current.selfName || profileNameRef.current || "",
+            }
+          : readStoredSession();
+
+      if (!saved?.roomId || !saved?.memberId || restoringRef.current) return;
+
+      restoringRef.current = true;
+      socket.timeout(10000).emit(
+        "room:reconnect",
+        {
+          roomId: saved.roomId,
+          memberId: saved.memberId,
+          name: normalizeProfileName(saved.name),
+        },
+        (err, response) => {
+          restoringRef.current = false;
+          if (err || !response?.ok) {
+            setError("Could not restore room after reconnect. Please join again.");
+            setInfo("");
+            clearStoredSession();
+            setSession(null);
+            return;
+          }
+
+          const stableName = normalizeProfileName(saved.name || profileNameRef.current);
+          setProfileName(stableName);
+          setRoomInput(response.room.roomId);
+          writeStoredSession({
+            roomId: response.room.roomId,
+            memberId: response.memberId,
+            name: stableName,
+          });
+          setSession({
+            ...response.room,
+            socketId: response.socketId,
+            memberId: response.memberId,
+            selfName: stableName,
+            playbackSyncedAt: Date.now(),
+          });
+          setInfo("Reconnected to your room.");
+          setError("");
+        }
+      );
+    };
+
+    const onConnect = () => {
+      setIsConnected(true);
+      setConnectionLabel("Connected");
+      attemptRestore();
+    };
+
+    const onDisconnect = () => {
+      setIsConnected(false);
+      setConnectionLabel("Reconnecting...");
+      if (sessionRef.current?.roomId) {
+        setInfo("Connection dropped. Reconnecting automatically...");
+      }
+    };
+
+    const onConnectError = () => {
+      setIsConnected(false);
+      setConnectionLabel("Connection issue");
+    };
+
+    const onReconnectAttempt = () => {
+      setConnectionLabel("Reconnecting...");
+    };
+
+    const onReconnectFailed = () => {
+      setConnectionLabel("Reconnect failed");
+      setError("Network unstable. Please check internet and retry.");
+    };
+
+    const onRoomState = (room) => {
+      setSession((prev) => {
+        if (!prev || prev.roomId !== room.roomId) return prev;
+        return {
+          ...prev,
+          ...room,
+          playbackSyncedAt: Date.now(),
+        };
+      });
+    };
+
+    const onPlaybackUpdated = (payload) => {
+      setSession((prev) => {
+        if (!prev || prev.roomId !== payload.roomId) return prev;
+        return {
+          ...prev,
+          playback: payload.playback,
+          playbackSyncedAt: Date.now(),
+        };
+      });
+    };
+
+    const onChatNew = (incoming) => {
+      setSession((prev) => {
+        if (!prev) return prev;
+        const exists = prev.messages?.some((message) => message.id === incoming.id);
+        if (exists) return prev;
+        return { ...prev, messages: [...(prev.messages || []), incoming] };
+      });
+    };
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onConnectError);
+    manager.on("reconnect_attempt", onReconnectAttempt);
+    manager.on("reconnect_failed", onReconnectFailed);
+    socket.on("room:state", onRoomState);
+    socket.on("playback:updated", onPlaybackUpdated);
+    socket.on("chat:new", onChatNew);
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onConnectError);
+      manager.off("reconnect_attempt", onReconnectAttempt);
+      manager.off("reconnect_failed", onReconnectFailed);
+      socket.off("room:state", onRoomState);
+      socket.off("playback:updated", onPlaybackUpdated);
+      socket.off("chat:new", onChatNew);
+      socket.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick((value) => value + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const query = window.matchMedia("(max-width: 760px)");
+    const onChange = (event) => {
+      if (!event.matches) setIsMediaPanelOpen(true);
+    };
+
+    if (query.addEventListener) {
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    }
+
+    query.addListener(onChange);
+    return () => query.removeListener(onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!session?.media) return;
+    setMediaType(session.media.type || "youtube");
+    setMediaUrl(session.media.url || "");
+  }, [session?.media?.type, session?.media?.url]);
+
+  useEffect(() => {
+    if (session?.media?.type !== "youtube" || !playerRef.current || !computedPlayback) return;
+
+    const timer = setTimeout(() => {
+      const player = playerRef.current;
+      if (!player?.getCurrentTime) return;
+
+      const targetTime = computedPlayback.currentTime || 0;
+      const current = player.getCurrentTime();
+      const drift = Math.abs(current - targetTime);
+      const playerState = player.getPlayerState?.();
+
+      if (drift > 1.2) {
+        suppressLocalSync.current = true;
+        player.seekTo(targetTime, true);
+        setTimeout(() => {
+          suppressLocalSync.current = false;
+        }, 150);
+      }
+
+      if (computedPlayback.isPlaying && playerState !== 1) {
+        suppressLocalSync.current = true;
+        player.playVideo?.();
+        setTimeout(() => {
+          suppressLocalSync.current = false;
+        }, 150);
+      }
+
+      if (!computedPlayback.isPlaying && playerState === 1) {
+        suppressLocalSync.current = true;
+        player.pauseVideo?.();
+        setTimeout(() => {
+          suppressLocalSync.current = false;
+        }, 150);
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [computedPlayback, session?.media?.type]);
+
+  useEffect(() => {
+    if (!session?.roomId || !session?.memberId) return;
+    writeStoredSession({
+      roomId: session.roomId,
+      memberId: session.memberId,
+      name: session.selfName || normalizeProfileName(profileName),
+    });
+  }, [profileName, session?.roomId, session?.memberId, session?.selfName]);
+
+  useEffect(() => {
+    const container = chatMessagesRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [session?.messages?.length]);
+
+  const ensureConnected = () => {
+    if (socket.connected) return true;
+    setError("Still connecting. Please wait a moment and try again.");
+    return false;
+  };
+
+  const ensureName = () => normalizeProfileName(profileName);
+
+  const updatePlayback = (nextPlayback) => {
+    if (!session?.roomId || !isConnected) return;
+    socket.emit("playback:update", { roomId: session.roomId, playback: nextPlayback });
+    setSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        playback: {
+          ...prev.playback,
+          ...nextPlayback,
+        },
+        playbackSyncedAt: Date.now(),
+      };
+    });
+  };
+
+  const createRoom = () => {
+    if (!ensureConnected()) return;
+    const stableName = ensureName();
+
+    setError("");
+    setInfo("");
+    setProfileName(stableName);
+    socket.timeout(10000).emit("room:create", { name: stableName }, (err, response) => {
+      if (err || !response?.ok) {
+        setError(response?.error || "Unable to create room right now.");
+        return;
+      }
+
+      writeStoredSession({
+        roomId: response.room.roomId,
+        memberId: response.memberId,
+        name: stableName,
+      });
+
+      setSession({
+        ...response.room,
+        socketId: response.socketId,
+        memberId: response.memberId,
+        selfName: stableName,
+        playbackSyncedAt: Date.now(),
+      });
+      setRoomInput(response.room.roomId);
+      setInfo(`Room ${response.room.roomId} created.`);
+    });
+  };
+
+  const joinRoom = () => {
+    if (!ensureConnected()) return;
+
+    const roomId = roomInput.trim().toUpperCase();
+    if (!roomId) {
+      setError("Enter a room code.");
+      return;
+    }
+
+    const stableName = ensureName();
+    const saved = readStoredSession();
+    const memberId = saved?.roomId === roomId ? saved.memberId : undefined;
+
+    setError("");
+    setInfo("");
+    setProfileName(stableName);
+    socket.timeout(10000).emit(
+      "room:join",
+      { roomId, name: stableName, memberId },
+      (err, response) => {
+        if (err || !response?.ok) {
+          setError(response?.error || "Unable to join room.");
+          return;
+        }
+
+        writeStoredSession({
+          roomId: response.room.roomId,
+          memberId: response.memberId,
+          name: stableName,
+        });
+
+        setSession({
+          ...response.room,
+          socketId: response.socketId,
+          memberId: response.memberId,
+          selfName: stableName,
+          playbackSyncedAt: Date.now(),
+        });
+        setInfo(`Joined room ${response.room.roomId}.`);
+      }
+    );
+  };
+
+  const leaveRoom = () => {
+    if (session?.roomId && socket.connected) {
+      socket.emit("room:leave", { roomId: session.roomId });
+    }
+    clearStoredSession();
+    setSession(null);
+    setMediaType("youtube");
+    setMediaUrl("");
+    setChatInput("");
+    setInfo("");
+    setError("");
+    setIsFullView(false);
+    setIsStickerPickerOpen(false);
+    playerRef.current = null;
+  };
+
+  const applyMedia = () => {
+    if (!session?.roomId || !ensureConnected()) return;
+
+    if (mediaType === "youtube") {
+      const videoId = extractYouTubeId(mediaUrl);
+      if (!videoId) {
+        setError("Please provide a valid YouTube link.");
+        return;
+      }
+      socket.timeout(10000).emit(
+        "media:set",
+        {
+          roomId: session.roomId,
+          media: { type: "youtube", url: mediaUrl.trim(), videoId },
+        },
+        (err, response) => {
+          if (err || !response?.ok) {
+            setError(response?.error || "Could not load media.");
+            return;
+          }
+          setError("");
+          setInfo("YouTube video loaded for everyone.");
+          if (typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches) {
+            setIsMediaPanelOpen(false);
+          }
+        }
+      );
+      return;
+    }
+
+    if (!/^https?:\/\/(www\.)?netflix\.com/i.test(mediaUrl.trim())) {
+      setError("Please provide a valid Netflix URL.");
+      return;
+    }
+
+    socket.timeout(10000).emit(
+      "media:set",
+      {
+        roomId: session.roomId,
+        media: { type: "netflix", url: mediaUrl.trim(), videoId: "" },
+      },
+      (err, response) => {
+        if (err || !response?.ok) {
+          setError(response?.error || "Could not set Netflix mode.");
+          return;
+        }
+        setError("");
+        setInfo("Netflix sync mode enabled.");
+        if (typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches) {
+          setIsMediaPanelOpen(false);
+        }
+      }
+    );
+  };
+
+  const sendMessage = (event) => {
+    event.preventDefault();
+    if (!chatInput.trim() || !session?.roomId || !ensureConnected()) return;
+
+    socket.timeout(8000).emit(
+      "chat:send",
+      { roomId: session.roomId, message: chatInput.trim() },
+      (err, response) => {
+        if (err || !response?.ok) {
+          setError(response?.error || "Message failed to send.");
+          return;
+        }
+        setChatInput("");
+      }
+    );
+  };
+
+  const sendSticker = (stickerKey) => {
+    if (!session?.roomId || !ensureConnected()) return;
+    if (!STICKERS.some((sticker) => sticker.key === stickerKey)) return;
+
+    socket.timeout(8000).emit(
+      "chat:send",
+      { roomId: session.roomId, sticker: stickerKey },
+      (err, response) => {
+        if (err || !response?.ok) {
+          setError(response?.error || "Sticker failed to send.");
+          return;
+        }
+        setIsStickerPickerOpen(false);
+      }
+    );
+  };
+
+  const onYouTubeReady = (event) => {
+    playerRef.current = event.target;
+  };
+
+  const onYouTubeStateChange = (event) => {
+    if (!session || session.media?.type !== "youtube" || suppressLocalSync.current) return;
+
+    const state = event.data;
+    const yt = event.target;
+    const currentTime = yt.getCurrentTime?.() || 0;
+    const playbackRate = yt.getPlaybackRate?.() || 1;
+
+    if (state === 1) {
+      updatePlayback({ isPlaying: true, currentTime, playbackRate });
+      return;
+    }
+    if (state === 2) {
+      updatePlayback({ isPlaying: false, currentTime, playbackRate });
+      return;
+    }
+    if (state === 0) {
+      updatePlayback({ isPlaying: false, currentTime: 0, playbackRate: 1 });
+    }
+  };
+
+  const onYouTubeRateChange = (event) => {
+    if (suppressLocalSync.current || !session || session.media?.type !== "youtube") return;
+    const yt = event.target;
+    updatePlayback({
+      playbackRate: yt.getPlaybackRate?.() || 1,
+      currentTime: yt.getCurrentTime?.() || 0,
+    });
+  };
+
+  const youtubeOpts = {
+    width: "100%",
+    height: "100%",
+    playerVars: {
+      autoplay: 0,
+      rel: 0,
+      modestbranding: 1,
+      playsinline: 1,
+      origin: window.location.origin,
+    },
+  };
+
+  const renderLoveBackground = () => (
+    <div className="hearts-bg" aria-hidden="true">
+      {LOVE_PARTICLES.map((particle) => (
+        <span
+          key={particle.id}
+          className={`heart ${particle.kind === "tag" ? "heart-tag" : ""}`}
+          style={{
+            "--heart-left": particle.left,
+            "--heart-size": particle.size,
+            "--heart-duration": particle.duration,
+            "--heart-delay": particle.delay,
+            "--heart-sway-mid": particle.swayMid,
+            "--heart-sway-end": particle.swayEnd,
+            "--heart-opacity": particle.opacity,
+            "--heart-color": particle.color,
+          }}
+        >
+          {particle.kind === "tag" ? particle.label : "\u2665"}
+        </span>
+      ))}
+    </div>
+  );
+
+  if (!session) {
+    return (
+      <div className="landing">
+        {renderLoveBackground()}
+        <div className="panel">
+          <p className="love-tag">Made with love for {LOVE_NAME}</p>
+          <h1>Teleparty Love {"\u2665"}</h1>
+          <p>Create a room, share a YouTube or Netflix link, and watch together with live chat.</p>
+          <p className="nunu-note">Date night mode is on {"\u2728"}</p>
+          <label htmlFor="name-input">Your name</label>
+          <input
+            id="name-input"
+            value={profileName}
+            onChange={(event) => setProfileName(event.target.value)}
+            placeholder="Enter your name"
+            maxLength={24}
+          />
+          <div className="row">
+            <button onClick={createRoom}>Create Room</button>
+          </div>
+          <label htmlFor="room-input">Room code</label>
+          <div className="row">
+            <input
+              id="room-input"
+              value={roomInput}
+              onChange={(event) => setRoomInput(event.target.value)}
+              placeholder="ABC123"
+              maxLength={6}
+            />
+            <button onClick={joinRoom}>Join</button>
+          </div>
+          <p className={`status ${isConnected ? "online" : "offline"}`}>{connectionLabel}</p>
+          {error ? <p className="error">{error}</p> : null}
+          {info ? <p className="info">{info}</p> : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`app-shell ${isFullView ? "full-view" : ""}`}>
+      {!isFullView ? renderLoveBackground() : null}
+      {!isFullView ? (
+        <header className="topbar">
+          <div>
+            <h2>{LOVE_NAME}'s Cozy Room {"\u2665"}</h2>
+            <p>Code: {session.roomId}</p>
+            <p>{session.members?.filter((member) => member.isOnline).length || 0} online</p>
+          </div>
+          <div className="topbar-actions">
+            <span className={`connection-pill ${isConnected ? "online" : "offline"}`}>
+              {connectionLabel}
+            </span>
+            <button type="button" className="secondary" onClick={() => setIsFullView(true)}>
+              Full View
+            </button>
+            <button className="secondary" onClick={leaveRoom}>
+              Leave
+            </button>
+          </div>
+        </header>
+      ) : (
+        <div className="focus-toolbar">
+          <button type="button" className="secondary" onClick={() => setIsFullView(false)}>
+            Exit Full View
+          </button>
+          <button type="button" className="secondary" onClick={leaveRoom}>
+            Leave
+          </button>
+        </div>
+      )}
+
+      <main className="content">
+        <section className="watch-area">
+          {!isFullView ? (
+            <>
+              <button
+                type="button"
+                className="media-toggle secondary"
+                onClick={() => setIsMediaPanelOpen((value) => !value)}
+              >
+                {isMediaPanelOpen ? "Hide media controls ▲" : "Show media controls ▼"}
+              </button>
+
+              {isMediaPanelOpen ? (
+                <div className="media-controls">
+                  <select value={mediaType} onChange={(event) => setMediaType(event.target.value)}>
+                    <option value="youtube">YouTube</option>
+                    <option value="netflix">Netflix</option>
+                  </select>
+                  <input
+                    value={mediaUrl}
+                    onChange={(event) => setMediaUrl(event.target.value)}
+                    placeholder={
+                      mediaType === "youtube" ? "Paste YouTube link" : "Paste Netflix title link"
+                    }
+                  />
+                  <button onClick={applyMedia}>Load</button>
+                </div>
+              ) : (
+                <p className="media-collapsed-note">Media controls collapsed to keep chat visible.</p>
+              )}
+            </>
+          ) : null}
+
+          {session.media?.type === "youtube" && session.media?.videoId ? (
+            <div className="player-wrap">
+              <YouTube
+                videoId={session.media.videoId}
+                opts={youtubeOpts}
+                className="youtube-frame"
+                iframeClassName="youtube-iframe"
+                onReady={onYouTubeReady}
+                onStateChange={onYouTubeStateChange}
+                onPlaybackRateChange={onYouTubeRateChange}
+              />
+            </div>
+          ) : null}
+
+          {session.media?.type === "youtube" && !session.media?.videoId ? (
+            <div className="empty-player">
+              <p>No video loaded yet. Add a YouTube link to start watching.</p>
+            </div>
+          ) : null}
+
+          {session.media?.type === "netflix" ? (
+            <div className="netflix-box">
+              <p>
+                Netflix blocks in-app embedding because of DRM and browser security policies. Open the
+                same Netflix link on each phone and use these synced controls + chat to watch together.
+              </p>
+              <div className="netflix-actions">
+                <a href={session.media.url || "#"} target="_blank" rel="noreferrer">
+                  Open Netflix Link
+                </a>
+                <span>Synced timer: {formatClock(computedPlayback?.currentTime || 0)}</span>
+              </div>
+              <div className="sync-buttons">
+                <button
+                  onClick={() =>
+                    updatePlayback({
+                      isPlaying: !(computedPlayback?.isPlaying || false),
+                      currentTime: computedPlayback?.currentTime || 0,
+                      playbackRate: 1,
+                    })
+                  }
+                >
+                  {computedPlayback?.isPlaying ? "Pause Sync" : "Play Sync"}
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() =>
+                    updatePlayback({
+                      currentTime: Math.max(0, (computedPlayback?.currentTime || 0) - 10),
+                    })
+                  }
+                >
+                  -10s
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() =>
+                    updatePlayback({
+                      currentTime: (computedPlayback?.currentTime || 0) + 10,
+                    })
+                  }
+                >
+                  +10s
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {error ? <p className="error">{error}</p> : null}
+          {info ? <p className="info">{info}</p> : null}
+        </section>
+
+        <aside className="chat-area">
+          <div className="member-list">
+            {session.members?.map((member) => (
+              <span
+                key={member.memberId}
+                className={`${member.isOnline ? "online" : "away"} ${
+                  member.memberId === session.memberId ? "self" : ""
+                }`}
+              >
+                {member.name}
+                {member.memberId === session.memberId ? " (You)" : ""}
+              </span>
+            ))}
+          </div>
+          <div className="chat-messages" ref={chatMessagesRef}>
+            {(session.messages || []).map((message) => (
+              <div className={`message ${message.type === "sticker" ? "sticker-message" : ""}`} key={message.id}>
+                <strong>{message.sender}</strong>
+                {message.sticker ? (
+                  <div className="sticker-bubble">
+                    <img
+                      src={STICKERS.find((item) => item.key === message.sticker)?.src || pandaSticker}
+                      alt={message.sticker}
+                      className="sticker-image"
+                    />
+                  </div>
+                ) : (
+                  <p>{message.text}</p>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="chat-tools">
+            <button
+              type="button"
+              className="secondary sticker-toggle"
+              onClick={() => setIsStickerPickerOpen((value) => !value)}
+            >
+              {isStickerPickerOpen ? "Hide Stickers" : "Stickers"}
+            </button>
+            {isStickerPickerOpen ? (
+              <div className="sticker-picker">
+                {STICKERS.map((sticker) => (
+                  <button
+                    key={sticker.key}
+                    type="button"
+                    className="sticker-btn"
+                    onClick={() => sendSticker(sticker.key)}
+                    title={sticker.label}
+                  >
+                    <img src={sticker.src} alt={sticker.label} className="sticker-thumb" />
+                    <small>{sticker.label}</small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <form className="chat-form" onSubmit={sendMessage}>
+            <input
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              placeholder="Type message"
+              maxLength={500}
+            />
+            <button type="submit">Send</button>
+          </form>
+        </aside>
+      </main>
+    </div>
+  );
+}
+
+export default App;
