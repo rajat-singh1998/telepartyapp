@@ -2,7 +2,6 @@ services:
   - type: web
     name: teleparty-client
     runtime: static
-    plan: free
     rootDir: client
     buildCommand: npm install && npm run build
     staticPublishPath: dist
