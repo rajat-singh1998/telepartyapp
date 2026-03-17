@@ -251,6 +251,7 @@ function App() {
   );
   const [isFullView, setIsFullView] = useState(false);
   const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false);
+  const [isChatComposerFocused, setIsChatComposerFocused] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [tick, setTick] = useState(0);
@@ -1010,7 +1011,11 @@ function App() {
   }
 
   return (
-    <div className={`app-shell ${isFullView ? "full-view" : ""}`}>
+    <div
+      className={`app-shell ${isFullView ? "full-view" : ""} ${
+        isChatComposerFocused ? "keyboard-open" : ""
+      }`}
+    >
       {!isFullView ? renderLoveBackground() : null}
       {renderHeartRain()}
       {!isFullView ? renderMascotPictures("compact") : null}
@@ -1249,6 +1254,8 @@ function App() {
             <input
               value={chatInput}
               onChange={(event) => setChatInput(event.target.value)}
+              onFocus={() => setIsChatComposerFocused(true)}
+              onBlur={() => setIsChatComposerFocused(false)}
               placeholder="Type message"
               maxLength={500}
             />

@@ -748,6 +748,29 @@ select {
     z-index: 3;
   }
 
+  .app-shell.keyboard-open {
+    min-height: 100svh;
+    height: auto;
+    overflow: visible;
+  }
+
+  .app-shell.keyboard-open .content {
+    overflow: visible;
+    gap: 0.5rem;
+  }
+
+  .app-shell.keyboard-open .watch-area {
+    top: 0;
+  }
+
+  .app-shell.keyboard-open .player-wrap {
+    aspect-ratio: 16 / 8.8;
+  }
+
+  .app-shell.keyboard-open .chat-messages {
+    max-height: 22dvh;
+  }
+
   .media-controls {
     grid-template-columns: 1fr;
   }
