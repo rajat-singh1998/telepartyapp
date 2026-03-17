@@ -50,6 +50,9 @@ const generateMemberId = customAlphabet(
   12
 );
 const DISCONNECT_GRACE_MS = Number(process.env.DISCONNECT_GRACE_MS || 45000);
+const BELL_COOLDOWN_MS = Number(process.env.BELL_COOLDOWN_MS || 5000);
+const HEART_RAIN_COOLDOWN_MS = Number(process.env.HEART_RAIN_COOLDOWN_MS || 8000);
+const ROOM_IDLE_TTL_MS = Number(process.env.ROOM_IDLE_TTL_MS || 21600000);
 
 const rooms = new Map();
 const socketPresence = new Map();
@@ -89,6 +92,15 @@ const createRoomState = (host) => ({
     updatedBy: host.memberId,
   },
   messages: [],
+  bells: {
+    lastRangAt: 0,
+    lastRangBy: host.memberId,
+  },
+  hearts: {
+    lastBurstAt: 0,
+    lastBurstBy: host.memberId,
+  },
+  roomCleanupTimer: null,
   createdAt: Date.now(),
 });
 
@@ -147,6 +159,11 @@ const deleteRoom = (roomId) => {
   const room = rooms.get(roomId);
   if (!room) return;
 
+  if (room.roomCleanupTimer) {
+    clearTimeout(room.roomCleanupTimer);
+    room.roomCleanupTimer = null;
+  }
+
   for (const timer of room.pendingRemovals.values()) {
     clearTimeout(timer);
   }
@@ -162,6 +179,24 @@ const deleteRoom = (roomId) => {
   rooms.delete(roomId);
 };
 
+const clearRoomCleanup = (room) => {
+  if (!room?.roomCleanupTimer) return;
+  clearTimeout(room.roomCleanupTimer);
+  room.roomCleanupTimer = null;
+};
+
+const scheduleRoomCleanup = (room) => {
+  clearRoomCleanup(room);
+
+  room.roomCleanupTimer = setTimeout(() => {
+    const activeRoom = rooms.get(room.roomId);
+    if (!activeRoom) return;
+    const hasOnlineMember = Array.from(activeRoom.members.values()).some((member) => member.isOnline);
+    if (hasOnlineMember) return;
+    deleteRoom(activeRoom.roomId);
+  }, ROOM_IDLE_TTL_MS);
+};
+
 const removeMember = (room, memberId) => {
   const member = room.members.get(memberId);
   if (!member) return;
@@ -174,8 +209,7 @@ const removeMember = (room, memberId) => {
 
   room.members.delete(memberId);
   if (room.members.size === 0) {
-    deleteRoom(room.roomId);
-    return;
+    scheduleRoomCleanup(room);
   }
 
   io.to(room.roomId).emit("room:state", serializeRoom(room));
@@ -197,6 +231,7 @@ const scheduleRemoval = (room, memberId) => {
 
 const attachMemberToSocket = (room, member, socket) => {
   clearPendingRemoval(room, member.memberId);
+  clearRoomCleanup(room);
 
   if (member.socketId && member.socketId !== socket.id) {
     socketPresence.delete(member.socketId);
@@ -424,6 +459,64 @@ io.on("connection", (socket) => {
     callback?.({ ok: true });
   });
 
+  socket.on("bell:ring", (payload, callback) => {
+    const context = getContext(socket, payload?.roomId);
+    if (!context) {
+      callback?.({ ok: false, error: "Room unavailable." });
+      return;
+    }
+
+    const { room, member } = context;
+    const now = Date.now();
+    if (now - room.bells.lastRangAt < BELL_COOLDOWN_MS) {
+      callback?.({ ok: false, error: "Bell is cooling down. Try again in a few seconds." });
+      return;
+    }
+
+    room.bells = {
+      lastRangAt: now,
+      lastRangBy: member.memberId,
+    };
+
+    io.to(room.roomId).emit("bell:rung", {
+      roomId: room.roomId,
+      senderId: member.memberId,
+      senderName: member.name,
+      createdAt: now,
+    });
+
+    callback?.({ ok: true, createdAt: now });
+  });
+
+  socket.on("heart:burst", (payload, callback) => {
+    const context = getContext(socket, payload?.roomId);
+    if (!context) {
+      callback?.({ ok: false, error: "Room unavailable." });
+      return;
+    }
+
+    const { room, member } = context;
+    const now = Date.now();
+    if (now - room.hearts.lastBurstAt < HEART_RAIN_COOLDOWN_MS) {
+      callback?.({ ok: false, error: "Heart rain is resting for a moment. Try again in a few seconds." });
+      return;
+    }
+
+    room.hearts = {
+      lastBurstAt: now,
+      lastBurstBy: member.memberId,
+    };
+
+    io.to(room.roomId).emit("heart:burst", {
+      roomId: room.roomId,
+      senderId: member.memberId,
+      senderName: member.name,
+      createdAt: now,
+    });
+
+    callback?.({ ok: true, createdAt: now });
+  });
+
   socket.on("disconnect", () => {
     const presence = socketPresence.get(socket.id);
     if (!presence) return;
@@ -439,6 +532,9 @@ io.on("connection", (socket) => {
     member.socketId = null;
     member.isOnline = false;
     member.lastSeenAt = Date.now();
+    if (Array.from(room.members.values()).every((roomMember) => !roomMember.isOnline)) {
+      scheduleRoomCleanup(room);
+    }
     scheduleRemoval(room, member.memberId);
     io.to(room.roomId).emit("room:state", serializeRoom(room));
   });

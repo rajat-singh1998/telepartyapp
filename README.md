@@ -81,6 +81,7 @@ The client service is already configured to read the backend public URL from the
 4. After service is created, open the backend service and set env vars:
    - `CLIENT_ORIGIN=https://your-app.vercel.app`
    - `DISCONNECT_GRACE_MS=45000`
+   - `ROOM_IDLE_TTL_MS=21600000`
 5. Deploy and verify:
    - `https://your-backend.onrender.com/health` returns JSON.
 
@@ -134,6 +135,7 @@ telepartyapp/
 - Socket.IO automatic reconnect with retry backoff
 - Auto room restore from local session storage
 - Server disconnect grace window (`DISCONNECT_GRACE_MS`) before removing dropped users
+- Empty rooms stay reusable for a while before cleanup (`ROOM_IDLE_TTL_MS`)
 - Playback and chat actions use ack timeouts to avoid silent failures
 - CORS allows comma-separated frontend origins via `CLIENT_ORIGIN`
 

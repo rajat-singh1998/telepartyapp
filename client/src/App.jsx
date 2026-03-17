@@ -4,6 +4,7 @@ import YouTube from "react-youtube";
 import { extractYouTubeId } from "./utils/youtube";
 import pandaSticker from "./assets/stickers/panda.svg";
 import penguinSticker from "./assets/stickers/penguin.svg";
+import cuddleMascot from "./assets/stickers/panda-penguin-cuddle.svg";
 
 const SOCKET_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
 const SESSION_STORAGE_KEY = "teleparty_session_v1";
@@ -12,6 +13,8 @@ const STICKERS = [
   { key: "panda", label: "Panda", src: pandaSticker },
   { key: "penguin", label: "Penguin", src: penguinSticker },
 ];
+const BELL_ICON = "\uD83D\uDD14";
+const HEART_ICON = "\u2665";
 const LOVE_PARTICLES = [
   {
     id: "heart-1",
@@ -222,6 +225,18 @@ const normalizeProfileName = (name) => {
   return safe.slice(0, 24);
 };
 
+const createHeartRainParticles = (count = 140) =>
+  Array.from({ length: count }, (_, index) => ({
+    id: `${Date.now()}-${index}-${Math.round(Math.random() * 1e6)}`,
+    left: `${Math.random() * 100}%`,
+    delay: `${Math.random() * 1.15}s`,
+    duration: `${3.3 + Math.random() * 1.8}s`,
+    size: `${0.34 + Math.random() * 0.34}rem`,
+    drift: `${-36 + Math.random() * 72}px`,
+    opacity: (0.5 + Math.random() * 0.45).toFixed(2),
+    rotate: `${-26 + Math.random() * 52}deg`,
+  }));
+
 function App() {
   const storedSession = readStoredSession();
   const [isConnected, setIsConnected] = useState(false);
@@ -247,6 +262,11 @@ function App() {
   const sessionRef = useRef(null);
   const profileNameRef = useRef(profileName);
   const restoringRef = useRef(false);
+  const audioContextRef = useRef(null);
+  const [bellCooldownUntil, setBellCooldownUntil] = useState(0);
+  const [heartCooldownUntil, setHeartCooldownUntil] = useState(0);
+  const [heartRainBursts, setHeartRainBursts] = useState([]);
+  const heartRainTimersRef = useRef([]);
 
   const computedPlayback = useMemo(() => {
     if (!session?.playback || !session?.playbackSyncedAt) return null;
@@ -375,6 +395,42 @@ function App() {
       });
     };
 
+    const onBellRung = async (payload) => {
+      setBellCooldownUntil(payload?.createdAt ? payload.createdAt + 5000 : Date.now() + 5000);
+
+      if (payload?.senderId === sessionRef.current?.memberId) {
+        return;
+      }
+
+      setInfo(`${payload?.senderName || "Someone"} rang the bell.`);
+
+      try {
+        await playBellTone();
+        await playBellVoice();
+      } catch (_err) {
+        setInfo(`${payload?.senderName || "Someone"} rang the bell. Tap anywhere if sound stayed muted.`);
+      }
+    };
+
+    const onHeartBurst = (payload) => {
+      const createdAt = payload?.createdAt || Date.now();
+      setHeartCooldownUntil(createdAt + 8000);
+      setInfo(`${payload?.senderName || "Someone"} started a heart shower.`);
+
+      const burstId = `${createdAt}-${payload?.senderId || "room"}`;
+      setHeartRainBursts((current) => [
+        ...current,
+        { id: burstId, particles: createHeartRainParticles() },
+      ]);
+
+      const timer = window.setTimeout(() => {
+        setHeartRainBursts((current) => current.filter((burst) => burst.id !== burstId));
+        heartRainTimersRef.current = heartRainTimersRef.current.filter((item) => item !== timer);
+      }, 5200);
+
+      heartRainTimersRef.current.push(timer);
+    };
+
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
@@ -383,8 +439,12 @@ function App() {
     socket.on("room:state", onRoomState);
     socket.on("playback:updated", onPlaybackUpdated);
     socket.on("chat:new", onChatNew);
+    socket.on("bell:rung", onBellRung);
+    socket.on("heart:burst", onHeartBurst);
 
     return () => {
+      heartRainTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      heartRainTimersRef.current = [];
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
@@ -393,6 +453,8 @@ function App() {
       socket.off("room:state", onRoomState);
       socket.off("playback:updated", onPlaybackUpdated);
       socket.off("chat:new", onChatNew);
+      socket.off("bell:rung", onBellRung);
+      socket.off("heart:burst", onHeartBurst);
       socket.disconnect();
     };
   }, []);
@@ -400,6 +462,29 @@ function App() {
   useEffect(() => {
     const interval = setInterval(() => setTick((value) => value + 1), 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const unlockBellAudio = async () => {
+      if (typeof window === "undefined") return;
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContextClass();
+      }
+
+      if (audioContextRef.current.state === "suspended") {
+        try {
+          await audioContextRef.current.resume();
+        } catch (_err) {
+          // Some browsers wait for another gesture before resuming audio.
+        }
+      }
+    };
+
+    window.addEventListener("pointerdown", unlockBellAudio, { passive: true });
+    return () => window.removeEventListener("pointerdown", unlockBellAudio);
   }, []);
 
   useEffect(() => {
@@ -486,6 +571,95 @@ function App() {
   };
 
   const ensureName = () => normalizeProfileName(profileName);
+
+  const playBellTone = async () => {
+    if (typeof window === "undefined") return;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextClass();
+    }
+
+    const context = audioContextRef.current;
+    if (context.state === "suspended") {
+      await context.resume();
+    }
+
+    const startAt = context.currentTime + 0.02;
+    const notes = [
+      { frequency: 784, duration: 0.18, gain: 0.24 },
+      { frequency: 1174.66, duration: 0.2, gain: 0.2 },
+      { frequency: 1567.98, duration: 0.28, gain: 0.16 },
+    ];
+
+    notes.forEach((note, index) => {
+      const oscillator = context.createOscillator();
+      const gainNode = context.createGain();
+      const noteStart = startAt + index * 0.08;
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(note.frequency, noteStart);
+      oscillator.connect(gainNode);
+      gainNode.connect(context.destination);
+
+      gainNode.gain.setValueAtTime(0.0001, noteStart);
+      gainNode.gain.exponentialRampToValueAtTime(note.gain, noteStart + 0.03);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, noteStart + note.duration);
+
+      oscillator.start(noteStart);
+      oscillator.stop(noteStart + note.duration + 0.03);
+    });
+  };
+
+  const playBellVoice = async () => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+
+    await new Promise((resolve) => {
+      const utterance = new SpeechSynthesisUtterance("Uthooo naaa");
+      utterance.lang = "hi-IN";
+      utterance.rate = 0.82;
+      utterance.pitch = 1.45;
+      utterance.volume = 1;
+
+      const finish = () => resolve();
+      utterance.onend = finish;
+      utterance.onerror = finish;
+
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+
+      window.setTimeout(finish, 2400);
+    });
+  };
+
+  const ringBell = () => {
+    if (!session?.roomId || !ensureConnected()) return;
+    if (Date.now() < bellCooldownUntil) return;
+
+    socket.timeout(8000).emit("bell:ring", { roomId: session.roomId }, (err, response) => {
+      if (err || !response?.ok) {
+        setError(response?.error || "Bell could not ring right now.");
+        return;
+      }
+      setBellCooldownUntil((response?.createdAt || Date.now()) + 5000);
+      setInfo("Bell sent to the room.");
+    });
+  };
+
+  const triggerHeartRain = () => {
+    if (!session?.roomId || !ensureConnected()) return;
+    if (Date.now() < heartCooldownUntil) return;
+
+    socket.timeout(8000).emit("heart:burst", { roomId: session.roomId }, (err, response) => {
+      if (err || !response?.ok) {
+        setError(response?.error || "Heart rain could not start right now.");
+        return;
+      }
+      setHeartCooldownUntil((response?.createdAt || Date.now()) + 8000);
+      setInfo("Heart rain sent to the room.");
+    });
+  };
 
   const updatePlayback = (nextPlayback) => {
     if (!session?.roomId || !isConnected) return;
@@ -751,11 +925,56 @@ function App() {
     </div>
   );
 
+  const renderHeartRain = () =>
+    heartRainBursts.length ? (
+      <div className="heart-rain-overlay" aria-hidden="true">
+        {heartRainBursts.flatMap((burst) =>
+          burst.particles.map((particle) => (
+            <span
+              key={particle.id}
+              className="heart-rain-drop"
+              style={{
+                "--rain-left": particle.left,
+                "--rain-delay": particle.delay,
+                "--rain-duration": particle.duration,
+                "--rain-size": particle.size,
+                "--rain-drift": particle.drift,
+                "--rain-opacity": particle.opacity,
+                "--rain-rotate": particle.rotate,
+              }}
+            >
+              {HEART_ICON}
+            </span>
+          ))
+        )}
+      </div>
+    ) : null;
+
+  const renderMascotPictures = (variant = "compact") => (
+    <div className={`mascot-pictures ${variant}`} aria-hidden="true">
+      {variant === "compact" ? (
+        <>
+          <div className="mascot-card panda-card">
+            <img src={pandaSticker} alt="" className="mascot-image" />
+            <span>Panda hugs</span>
+          </div>
+          <div className="mascot-card penguin-card">
+            <img src={penguinSticker} alt="" className="mascot-image" />
+            <span>Penguin kisses</span>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+
   if (!session) {
     return (
       <div className="landing">
         {renderLoveBackground()}
         <div className="panel">
+          <div className="panel-cuddle" aria-hidden="true">
+            <img src={cuddleMascot} alt="" className="panel-cuddle-image" />
+          </div>
           <p className="love-tag">Made with love for {LOVE_NAME}</p>
           <h1>Teleparty Love {"\u2665"}</h1>
           <p>Create a room, share a YouTube or Netflix link, and watch together with live chat.</p>
@@ -793,6 +1012,8 @@ function App() {
   return (
     <div className={`app-shell ${isFullView ? "full-view" : ""}`}>
       {!isFullView ? renderLoveBackground() : null}
+      {renderHeartRain()}
+      {!isFullView ? renderMascotPictures("compact") : null}
       {!isFullView ? (
         <header className="topbar">
           <div>
@@ -804,6 +1025,26 @@ function App() {
             <span className={`connection-pill ${isConnected ? "online" : "offline"}`}>
               {connectionLabel}
             </span>
+            <button
+              type="button"
+              className="secondary heart-rain-btn"
+              onClick={triggerHeartRain}
+              disabled={Date.now() < heartCooldownUntil}
+              aria-label="Start heart rain"
+              title="Start heart rain"
+            >
+              {HEART_ICON}
+            </button>
+            <button
+              type="button"
+              className="secondary bell-btn"
+              onClick={ringBell}
+              disabled={Date.now() < bellCooldownUntil}
+              aria-label="Ring bell"
+              title="Ring bell"
+            >
+              {BELL_ICON}
+            </button>
             <button type="button" className="secondary" onClick={() => setIsFullView(true)}>
               Full View
             </button>
@@ -814,6 +1055,26 @@ function App() {
         </header>
       ) : (
         <div className="focus-toolbar">
+          <button
+            type="button"
+            className="secondary heart-rain-btn"
+            onClick={triggerHeartRain}
+            disabled={Date.now() < heartCooldownUntil}
+            aria-label="Start heart rain"
+            title="Start heart rain"
+          >
+            {HEART_ICON}
+          </button>
+          <button
+            type="button"
+            className="secondary bell-btn"
+            onClick={ringBell}
+            disabled={Date.now() < bellCooldownUntil}
+            aria-label="Ring bell"
+            title="Ring bell"
+          >
+            {BELL_ICON}
+          </button>
           <button type="button" className="secondary" onClick={() => setIsFullView(false)}>
             Exit Full View
           </button>
