@@ -225,6 +225,17 @@ const normalizeProfileName = (name) => {
   return safe.slice(0, 24);
 };
 
+const getSpecialLoveMessage = (name) => {
+  const normalized = String(name || "").trim().toLowerCase();
+  if (normalized === "nunu") {
+    return "I love you Nunu \u2665";
+  }
+  if (normalized === "pussy") {
+    return "I love you Pussy \u2665 And I will make you wet";
+  }
+  return "";
+};
+
 const createHeartRainParticles = (count = 140) =>
   Array.from({ length: count }, (_, index) => ({
     id: `${Date.now()}-${index}-${Math.round(Math.random() * 1e6)}`,
@@ -256,6 +267,7 @@ function App() {
   const [info, setInfo] = useState("");
   const [tick, setTick] = useState(0);
   const [session, setSession] = useState(null);
+  const [specialPopupMessage, setSpecialPopupMessage] = useState("");
 
   const playerRef = useRef(null);
   const chatMessagesRef = useRef(null);
@@ -268,6 +280,7 @@ function App() {
   const [heartCooldownUntil, setHeartCooldownUntil] = useState(0);
   const [heartRainBursts, setHeartRainBursts] = useState([]);
   const heartRainTimersRef = useRef([]);
+  const specialPopupTimerRef = useRef(null);
 
   const computedPlayback = useMemo(() => {
     if (!session?.playback || !session?.playbackSyncedAt) return null;
@@ -281,6 +294,15 @@ function App() {
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  useEffect(
+    () => () => {
+      if (specialPopupTimerRef.current) {
+        window.clearTimeout(specialPopupTimerRef.current);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     socket.connect();
@@ -662,6 +684,20 @@ function App() {
     });
   };
 
+  const showSpecialLovePopup = (name) => {
+    const message = getSpecialLoveMessage(name);
+    if (!message) return;
+
+    setSpecialPopupMessage(message);
+    if (specialPopupTimerRef.current) {
+      window.clearTimeout(specialPopupTimerRef.current);
+    }
+    specialPopupTimerRef.current = window.setTimeout(() => {
+      setSpecialPopupMessage("");
+      specialPopupTimerRef.current = null;
+    }, 3000);
+  };
+
   const updatePlayback = (nextPlayback) => {
     if (!session?.roomId || !isConnected) return;
     socket.emit("playback:update", { roomId: session.roomId, playback: nextPlayback });
@@ -706,6 +742,7 @@ function App() {
       });
       setRoomInput(response.room.roomId);
       setInfo(`Room ${response.room.roomId} created.`);
+      showSpecialLovePopup(stableName);
     });
   };
 
@@ -951,6 +988,15 @@ function App() {
       </div>
     ) : null;
 
+  const renderSpecialPopup = () =>
+    specialPopupMessage ? (
+      <div className="special-love-popup" role="status" aria-live="polite">
+        <span className="special-love-popup-heart">{HEART_ICON}</span>
+        <span>{specialPopupMessage}</span>
+        <span className="special-love-popup-heart">{HEART_ICON}</span>
+      </div>
+    ) : null;
+
   const renderMascotPictures = (variant = "compact") => (
     <div className={`mascot-pictures ${variant}`} aria-hidden="true">
       {variant === "compact" ? (
@@ -1018,6 +1064,7 @@ function App() {
     >
       {!isFullView ? renderLoveBackground() : null}
       {renderHeartRain()}
+      {renderSpecialPopup()}
       {!isFullView ? renderMascotPictures("compact") : null}
       {!isFullView ? (
         <header className="topbar">
