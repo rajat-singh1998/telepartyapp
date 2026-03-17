@@ -5,6 +5,7 @@ import { extractYouTubeId } from "./utils/youtube";
 import pandaSticker from "./assets/stickers/panda.svg";
 import penguinSticker from "./assets/stickers/penguin.svg";
 import cuddleMascot from "./assets/stickers/panda-penguin-cuddle.svg";
+import bellVoiceUrl from "./assets/sounds/baby-bell-voice.mp3";
 
 const SOCKET_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
 const SESSION_STORAGE_KEY = "teleparty_session_v1";
@@ -276,8 +277,12 @@ function App() {
   const profileNameRef = useRef(profileName);
   const restoringRef = useRef(false);
   const audioContextRef = useRef(null);
+  const bellVoiceAudioRef = useRef(null);
+  const speechVoicesRef = useRef([]);
+  const soundReadyRef = useRef(false);
   const [bellCooldownUntil, setBellCooldownUntil] = useState(0);
   const [heartCooldownUntil, setHeartCooldownUntil] = useState(0);
+  const [isSoundReady, setIsSoundReady] = useState(false);
   const [heartRainBursts, setHeartRainBursts] = useState([]);
   const heartRainTimersRef = useRef([]);
   const specialPopupTimerRef = useRef(null);
@@ -287,6 +292,75 @@ function App() {
     return toComputedPlayback(session.playback, session.playbackSyncedAt);
   }, [session?.playback, session?.playbackSyncedAt, tick]);
 
+  const unlockBellAudio = async () => {
+    if (typeof window === "undefined") return false;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+    try {
+      if (AudioContextClass && !audioContextRef.current) {
+        audioContextRef.current = new AudioContextClass();
+      }
+
+      if (audioContextRef.current?.state === "suspended") {
+        await audioContextRef.current.resume();
+      }
+
+      if (!bellVoiceAudioRef.current) {
+        const audio = new Audio(bellVoiceUrl);
+        audio.preload = "auto";
+        audio.playsInline = true;
+        bellVoiceAudioRef.current = audio;
+      }
+
+      const bellVoiceAudio = bellVoiceAudioRef.current;
+      try {
+        bellVoiceAudio.muted = true;
+        bellVoiceAudio.volume = 0;
+        bellVoiceAudio.currentTime = 0;
+        await bellVoiceAudio.play();
+        bellVoiceAudio.pause();
+        bellVoiceAudio.currentTime = 0;
+      } catch (_err) {
+        // Some mobile browsers ignore warm-up play until an explicit tap.
+      } finally {
+        bellVoiceAudio.muted = false;
+        bellVoiceAudio.volume = 1;
+      }
+
+      if (window.speechSynthesis) {
+        speechVoicesRef.current = window.speechSynthesis.getVoices();
+        try {
+          window.speechSynthesis.resume?.();
+        } catch (_err) {
+          // Some mobile browsers do not implement resume cleanly.
+        }
+      }
+
+      setIsSoundReady(true);
+      setInfo("Sound enabled on this device.");
+      return true;
+    } catch (_err) {
+      setIsSoundReady(false);
+      setInfo("Tap Enable Sound once on this device so bell voice can play here.");
+      return false;
+    }
+  };
+
+  const enableSoundOnDevice = async () => {
+    const unlocked = await unlockBellAudio();
+    if (!unlocked) return;
+
+    try {
+      await playBellTone();
+      await playBellVoice();
+      setInfo("Sound enabled on this device.");
+    } catch (_err) {
+      setInfo("Sound unlocked, but preview stayed muted. Try tapping Enable Sound once more.");
+      setIsSoundReady(false);
+      soundReadyRef.current = false;
+    }
+  };
+
   useEffect(() => {
     profileNameRef.current = profileName;
   }, [profileName]);
@@ -294,6 +368,10 @@ function App() {
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  useEffect(() => {
+    soundReadyRef.current = isSoundReady;
+  }, [isSoundReady]);
 
   useEffect(
     () => () => {
@@ -421,8 +499,14 @@ function App() {
     const onBellRung = async (payload) => {
       setBellCooldownUntil(payload?.createdAt ? payload.createdAt + 5000 : Date.now() + 5000);
 
-      if (payload?.senderId === sessionRef.current?.memberId) {
+      const isSender = payload?.senderId === sessionRef.current?.memberId;
+      if (isSender) {
+        setInfo("Bell sent to the room.");
         return;
+      }
+
+      if (!soundReadyRef.current) {
+        setInfo("Tap Enable Sound once on this device so bell voice can play here.");
       }
 
       setInfo(`${payload?.senderName || "Someone"} rang the bell.`);
@@ -488,26 +572,26 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const unlockBellAudio = async () => {
-      if (typeof window === "undefined") return;
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) return;
-
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContextClass();
-      }
-
-      if (audioContextRef.current.state === "suspended") {
-        try {
-          await audioContextRef.current.resume();
-        } catch (_err) {
-          // Some browsers wait for another gesture before resuming audio.
-        }
+    window.addEventListener("pointerdown", unlockBellAudio, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlockBellAudio);
+      if (bellVoiceAudioRef.current) {
+        bellVoiceAudioRef.current.pause();
+        bellVoiceAudioRef.current = null;
       }
     };
+  }, []);
 
-    window.addEventListener("pointerdown", unlockBellAudio, { passive: true });
-    return () => window.removeEventListener("pointerdown", unlockBellAudio);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return undefined;
+
+    const loadVoices = () => {
+      speechVoicesRef.current = window.speechSynthesis.getVoices();
+    };
+
+    loadVoices();
+    window.speechSynthesis.addEventListener?.("voiceschanged", loadVoices);
+    return () => window.speechSynthesis.removeEventListener?.("voiceschanged", loadVoices);
   }, []);
 
   useEffect(() => {
@@ -635,13 +719,39 @@ function App() {
     });
   };
 
-  const playBellVoice = async () => {
+  const playFallbackBellVoice = async () => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
 
+    const synth = window.speechSynthesis;
+    let voices = speechVoicesRef.current.length ? speechVoicesRef.current : synth.getVoices();
+
+    if (!voices.length) {
+      voices = await new Promise((resolve) => {
+        const fallbackTimer = window.setTimeout(() => resolve(synth.getVoices()), 700);
+        const handleVoices = () => {
+          window.clearTimeout(fallbackTimer);
+          synth.removeEventListener?.("voiceschanged", handleVoices);
+          resolve(synth.getVoices());
+        };
+        synth.addEventListener?.("voiceschanged", handleVoices);
+      });
+    }
+
+    speechVoicesRef.current = voices;
+    const preferredVoice =
+      voices.find((voice) => /^hi[-_]/i.test(voice.lang)) ||
+      voices.find((voice) => /^en[-_](IN|GB|US)/i.test(voice.lang)) ||
+      voices[0];
+    const useHindiVoice = Boolean(preferredVoice && /^hi[-_]/i.test(preferredVoice.lang));
+    const spokenText = useHindiVoice ? "\u0909\u0920\u094B \u0928\u093E" : "Uthooo naaa";
+
     await new Promise((resolve) => {
-      const utterance = new SpeechSynthesisUtterance("Uthooo naaa");
-      utterance.lang = "hi-IN";
-      utterance.rate = 0.82;
+      const utterance = new SpeechSynthesisUtterance(spokenText);
+      utterance.lang = preferredVoice?.lang || (useHindiVoice ? "hi-IN" : "en-IN");
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+      utterance.rate = 0.9;
       utterance.pitch = 1.45;
       utterance.volume = 1;
 
@@ -649,11 +759,41 @@ function App() {
       utterance.onend = finish;
       utterance.onerror = finish;
 
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
+      if (synth.speaking || synth.pending) {
+        synth.cancel();
+      }
 
-      window.setTimeout(finish, 2400);
+      window.setTimeout(() => {
+        try {
+          synth.speak(utterance);
+        } catch (_err) {
+          resolve();
+        }
+      }, 80);
+
+      window.setTimeout(finish, 3200);
     });
+  };
+
+  const playBellVoice = async () => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const audio = new Audio(bellVoiceUrl);
+      audio.preload = "auto";
+      audio.playsInline = true;
+      audio.volume = 1;
+      audio.currentTime = 0;
+      await audio.play();
+
+      window.setTimeout(() => {
+        audio.pause();
+        audio.src = "";
+      }, 5000);
+      return;
+    } catch (_err) {
+      await playFallbackBellVoice();
+    }
   };
 
   const ringBell = () => {
@@ -1016,56 +1156,60 @@ function App() {
 
   if (!session) {
     return (
-      <div className="landing">
-        {renderLoveBackground()}
-        <div className="panel">
-          <div className="panel-cuddle" aria-hidden="true">
-            <img src={cuddleMascot} alt="" className="panel-cuddle-image" />
-          </div>
-          <p className="love-tag">Made with love for {LOVE_NAME}</p>
-          <h1>Teleparty Love {"\u2665"}</h1>
-          <p>Create a room, share a YouTube or Netflix link, and watch together with live chat.</p>
-          <p className="nunu-note">Date night mode is on {"\u2728"}</p>
-          <label htmlFor="name-input">Your name</label>
-          <input
-            id="name-input"
-            value={profileName}
-            onChange={(event) => setProfileName(event.target.value)}
-            placeholder="Enter your name"
-            maxLength={24}
-          />
-          <div className="row">
-            <button onClick={createRoom}>Create Room</button>
-          </div>
-          <label htmlFor="room-input">Room code</label>
-          <div className="row">
+      <>
+        {renderSpecialPopup()}
+        <div className="landing">
+          {renderLoveBackground()}
+          <div className="panel">
+            <div className="panel-cuddle" aria-hidden="true">
+              <img src={cuddleMascot} alt="" className="panel-cuddle-image" />
+            </div>
+            <p className="love-tag">Made with love for {LOVE_NAME}</p>
+            <h1>Teleparty Love {"\u2665"}</h1>
+            <p>Create a room, share a YouTube or Netflix link, and watch together with live chat.</p>
+            <p className="nunu-note">Date night mode is on {"\u2728"}</p>
+            <label htmlFor="name-input">Your name</label>
             <input
-              id="room-input"
-              value={roomInput}
-              onChange={(event) => setRoomInput(event.target.value)}
-              placeholder="ABC123"
-              maxLength={6}
+              id="name-input"
+              value={profileName}
+              onChange={(event) => setProfileName(event.target.value)}
+              placeholder="Enter your name"
+              maxLength={24}
             />
-            <button onClick={joinRoom}>Join</button>
+            <div className="row">
+              <button onClick={createRoom}>Create Room</button>
+            </div>
+            <label htmlFor="room-input">Room code</label>
+            <div className="row">
+              <input
+                id="room-input"
+                value={roomInput}
+                onChange={(event) => setRoomInput(event.target.value)}
+                placeholder="ABC123"
+                maxLength={6}
+              />
+              <button onClick={joinRoom}>Join</button>
+            </div>
+            <p className={`status ${isConnected ? "online" : "offline"}`}>{connectionLabel}</p>
+            {error ? <p className="error">{error}</p> : null}
+            {info ? <p className="info">{info}</p> : null}
           </div>
-          <p className={`status ${isConnected ? "online" : "offline"}`}>{connectionLabel}</p>
-          {error ? <p className="error">{error}</p> : null}
-          {info ? <p className="info">{info}</p> : null}
         </div>
-      </div>
+      </>
     );
   }
 
   return (
-    <div
-      className={`app-shell ${isFullView ? "full-view" : ""} ${
-        isChatComposerFocused ? "keyboard-open" : ""
-      }`}
-    >
-      {!isFullView ? renderLoveBackground() : null}
-      {renderHeartRain()}
+    <>
       {renderSpecialPopup()}
-      {!isFullView ? renderMascotPictures("compact") : null}
+      <div
+        className={`app-shell ${isFullView ? "full-view" : ""} ${
+          isChatComposerFocused ? "keyboard-open" : ""
+        }`}
+      >
+        {!isFullView ? renderLoveBackground() : null}
+        {renderHeartRain()}
+        {!isFullView ? renderMascotPictures("compact") : null}
       {!isFullView ? (
         <header className="topbar">
           <div>
@@ -1077,6 +1221,17 @@ function App() {
             <span className={`connection-pill ${isConnected ? "online" : "offline"}`}>
               {connectionLabel}
             </span>
+            {!isSoundReady ? (
+              <button
+                type="button"
+                className="secondary sound-btn"
+                onClick={enableSoundOnDevice}
+                aria-label="Enable sound"
+                title="Enable sound"
+              >
+                🔊
+              </button>
+            ) : null}
             <button
               type="button"
               className="secondary heart-rain-btn"
@@ -1107,6 +1262,17 @@ function App() {
         </header>
       ) : (
         <div className="focus-toolbar">
+          {!isSoundReady ? (
+            <button
+              type="button"
+              className="secondary sound-btn"
+              onClick={enableSoundOnDevice}
+              aria-label="Enable sound"
+              title="Enable sound"
+            >
+              🔊
+            </button>
+          ) : null}
           <button
             type="button"
             className="secondary heart-rain-btn"
@@ -1309,8 +1475,9 @@ function App() {
             <button type="submit">Send</button>
           </form>
         </aside>
-      </main>
-    </div>
+        </main>
+      </div>
+    </>
   );
 }
 
