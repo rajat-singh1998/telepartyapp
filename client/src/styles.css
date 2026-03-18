@@ -323,8 +323,9 @@ select {
   color: rgba(255, 208, 232, 0.96);
   opacity: var(--rain-opacity, 0.85);
   text-shadow: 0 0 9px rgba(255, 182, 218, 0.68);
-  animation: heart-rain-fall var(--rain-duration, 4.4s) linear forwards;
+  animation: heart-rain-fall var(--rain-duration, 4.4s) cubic-bezier(0.22, 0.75, 0.2, 1) forwards;
   animation-delay: var(--rain-delay, 0s);
+  will-change: transform, opacity;
 }
 
 .kiss-rain-drop {
@@ -409,8 +410,19 @@ select {
     transform: translate3d(0, -10vh, 0) scale(0.88) rotate(0deg);
     opacity: 0;
   }
-  12% {
+  10% {
     opacity: var(--rain-opacity, 0.85);
+  }
+  28% {
+    transform: translate3d(var(--rain-drift-mid, 18px), 30vh, 0) scale(0.98)
+      rotate(calc(var(--rain-rotate, 12deg) * 0.35));
+  }
+  56% {
+    transform: translate3d(var(--rain-drift-late, -26px), 72vh, 0) scale(1.08)
+      rotate(calc(var(--rain-rotate, 12deg) * 0.72));
+  }
+  82% {
+    opacity: calc(var(--rain-opacity, 0.85) * 0.92);
   }
   100% {
     transform: translate3d(var(--rain-drift, 0px), 132vh, 0) scale(1.18) rotate(var(--rain-rotate, 12deg));
@@ -611,7 +623,7 @@ select {
 .chat-area {
   display: grid;
   gap: 0.65rem;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   min-height: 0;
   overflow: hidden;
 }
@@ -701,6 +713,7 @@ select {
 .chat-tools {
   display: grid;
   gap: 0.45rem;
+  min-height: 0;
 }
 
 .sticker-toggle {
@@ -837,6 +850,7 @@ select {
   .content {
     grid-template-rows: auto minmax(0, 1fr);
     overflow: hidden;
+    align-items: stretch;
   }
 
   .watch-area {
@@ -883,6 +897,20 @@ select {
     background: linear-gradient(180deg, rgba(74, 23, 61, 0), rgba(74, 23, 61, 0.96) 28%);
   }
 
+  .chat-area {
+    align-self: stretch;
+    height: 100%;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  .chat-tools {
+    max-height: min(24dvh, 14rem);
+    overflow-y: auto;
+    padding-right: 0.12rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .media-controls {
     grid-template-columns: 1fr;
   }
@@ -914,7 +942,7 @@ select {
   }
 
   .chat-messages {
-    max-height: 34dvh;
+    max-height: none;
   }
 }
 
