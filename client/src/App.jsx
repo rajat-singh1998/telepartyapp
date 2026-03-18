@@ -331,6 +331,7 @@ function App() {
   );
   const [isFullView, setIsFullView] = useState(false);
   const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false);
+  const [isGameOpen, setIsGameOpen] = useState(false);
   const [isChatComposerFocused, setIsChatComposerFocused] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -1156,6 +1157,7 @@ function App() {
     setError("");
     setIsFullView(false);
     setIsStickerPickerOpen(false);
+    setIsGameOpen(false);
     playerRef.current = null;
   };
 
@@ -1271,6 +1273,64 @@ function App() {
         setIsStickerPickerOpen(false);
       }
     );
+  };
+
+  const currentGame = session?.game || {
+    board: Array(9).fill(null),
+    nextTurn: "X",
+    winner: null,
+    winningLine: [],
+    players: { X: null, O: null },
+  };
+
+  const getMemberNameById = (memberId) =>
+    session?.members?.find((member) => member.memberId === memberId)?.name || "Waiting...";
+
+  const myGameSymbol =
+    currentGame.players?.X === session?.memberId
+      ? "X"
+      : currentGame.players?.O === session?.memberId
+        ? "O"
+        : "";
+
+  const gameStatusText = currentGame.winner
+    ? currentGame.winner === "draw"
+      ? "Draw game. Tap reset to play again."
+      : `${getMemberNameById(currentGame.players?.[currentGame.winner])} wins as ${currentGame.winner}.`
+    : myGameSymbol
+      ? currentGame.nextTurn === myGameSymbol
+        ? `Your turn as ${myGameSymbol}.`
+        : `${currentGame.nextTurn}'s turn now.`
+      : currentGame.players?.O
+        ? `Watching ${getMemberNameById(currentGame.players?.X)} vs ${getMemberNameById(
+            currentGame.players?.O
+          )}.`
+        : "Tap a square to join as the second player.";
+
+  const playGameMove = (index) => {
+    if (!session?.roomId || !ensureConnected()) return;
+
+    socket.timeout(8000).emit("game:move", { roomId: session.roomId, index }, (err, response) => {
+      if (err || !response?.ok) {
+        setError(response?.error || "Move could not be played.");
+        return;
+      }
+      setError("");
+      setInfo("Move played.");
+    });
+  };
+
+  const resetGame = () => {
+    if (!session?.roomId || !ensureConnected()) return;
+
+    socket.timeout(8000).emit("game:reset", { roomId: session.roomId }, (err, response) => {
+      if (err || !response?.ok) {
+        setError(response?.error || "Game could not reset.");
+        return;
+      }
+      setError("");
+      setInfo("Tic Tac Toe reset.");
+    });
   };
 
   const onYouTubeReady = (event) => {
@@ -1688,7 +1748,6 @@ function App() {
             </div>
           ) : null}
           {error ? <p className="error">{error}</p> : null}
-          {info ? <p className="info">{info}</p> : null}
         </section>
 
         <aside className="chat-area">
@@ -1724,13 +1783,22 @@ function App() {
             ))}
           </div>
           <div className="chat-tools">
-            <button
-              type="button"
-              className="secondary sticker-toggle"
-              onClick={() => setIsStickerPickerOpen((value) => !value)}
-            >
-              {isStickerPickerOpen ? "Hide Stickers" : "Stickers"}
-            </button>
+            <div className="chat-tool-actions">
+              <button
+                type="button"
+                className="secondary sticker-toggle"
+                onClick={() => setIsStickerPickerOpen((value) => !value)}
+              >
+                {isStickerPickerOpen ? "Hide Stickers" : "Stickers"}
+              </button>
+              <button
+                type="button"
+                className="secondary game-toggle"
+                onClick={() => setIsGameOpen((value) => !value)}
+              >
+                {isGameOpen ? "Hide Game" : "Tic Tac Toe"}
+              </button>
+            </div>
             {isStickerPickerOpen ? (
               <div className="sticker-picker-panel">
                 {TENOR_API_KEY ? (
@@ -1794,6 +1862,42 @@ function App() {
                     )}
                   </div>
                 ) : null}
+              </div>
+            ) : null}
+            {isGameOpen ? (
+              <div className="game-panel">
+                <div className="game-panel-top">
+                  <div>
+                    <strong>Tic Tac Toe</strong>
+                  </div>
+                  <button type="button" className="secondary game-reset" onClick={resetGame}>
+                    Reset
+                  </button>
+                </div>
+                <div className="game-player-row">
+                  <span className={currentGame.nextTurn === "X" && !currentGame.winner ? "active" : ""}>
+                    X: {getMemberNameById(currentGame.players?.X)}
+                  </span>
+                  <span className={currentGame.nextTurn === "O" && !currentGame.winner ? "active" : ""}>
+                    O: {getMemberNameById(currentGame.players?.O)}
+                  </span>
+                </div>
+                <div className="tic-board" role="grid" aria-label="Tic Tac Toe board">
+                  {currentGame.board.map((cell, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      className={`tic-cell ${
+                        currentGame.winningLine?.includes(index) ? "winning" : ""
+                      } ${cell ? "filled" : ""}`}
+                      onClick={() => playGameMove(index)}
+                      disabled={Boolean(cell) || Boolean(currentGame.winner)}
+                      aria-label={`Cell ${index + 1}${cell ? ` ${cell}` : ""}`}
+                    >
+                      {cell || ""}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
           </div>

@@ -55,6 +55,16 @@ const ROOM_IDLE_TTL_MS = Number(process.env.ROOM_IDLE_TTL_MS || 21600000);
 
 const rooms = new Map();
 const socketPresence = new Map();
+const WINNING_LINES = [
+  [0, 1, 2],
+  [3, 4, 5],
+  [6, 7, 8],
+  [0, 3, 6],
+  [1, 4, 7],
+  [2, 5, 8],
+  [0, 4, 8],
+  [2, 4, 6],
+];
 
 const createUniqueRoomId = () => {
   let roomId = generateRoomId();
@@ -103,6 +113,16 @@ const createRoomState = (host) => ({
     lastBurstAt: 0,
     lastBurstBy: host.memberId,
   },
+  game: {
+    board: Array(9).fill(null),
+    nextTurn: "X",
+    winner: null,
+    winningLine: [],
+    players: {
+      X: host.memberId,
+      O: null,
+    },
+  },
   roomCleanupTimer: null,
   createdAt: Date.now(),
 });
@@ -127,6 +147,7 @@ const serializeRoom = (room) => ({
   media: room.media,
   playback: getEffectivePlayback(room.playback),
   messages: room.messages,
+  game: room.game,
 });
 
 const clampTime = (value) => {
@@ -193,6 +214,73 @@ const normalizeMemberId = (memberId) => {
   return safe.slice(0, 32);
 };
 
+const sanitizeGamePlayers = (room) => {
+  const currentGame = room.game || {
+    board: Array(9).fill(null),
+    nextTurn: "X",
+    winner: null,
+    winningLine: [],
+    players: { X: null, O: null },
+  };
+
+  let xPlayer = currentGame.players?.X && room.members.has(currentGame.players.X) ? currentGame.players.X : null;
+  let oPlayer = currentGame.players?.O && room.members.has(currentGame.players.O) ? currentGame.players.O : null;
+
+  if (!xPlayer && oPlayer) {
+    xPlayer = oPlayer;
+    oPlayer = null;
+  }
+
+  room.game = {
+    board: Array(9).fill(null),
+    nextTurn: "X",
+    winner: null,
+    winningLine: [],
+    players: {
+      X: xPlayer,
+      O: oPlayer,
+    },
+  };
+};
+
+const assignGameSymbol = (room, memberId) => {
+  if (room.game.players.X === memberId) return "X";
+  if (room.game.players.O === memberId) return "O";
+  if (!room.game.players.X) {
+    room.game.players.X = memberId;
+    return "X";
+  }
+  if (!room.game.players.O) {
+    room.game.players.O = memberId;
+    return "O";
+  }
+  return "";
+};
+
+const getGameOutcome = (board) => {
+  for (const line of WINNING_LINES) {
+    const [a, b, c] = line;
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+      return {
+        winner: board[a],
+        winningLine: line,
+      };
+    }
+  }
+
+  if (board.every(Boolean)) {
+    return {
+      winner: "draw",
+      winningLine: [],
+    };
+  }
+
+  return {
+    winner: null,
+    winningLine: [],
+  };
+};
+
 const clearPendingRemoval = (room, memberId) => {
   const timer = room.pendingRemovals.get(memberId);
   if (timer) {
@@ -254,6 +342,9 @@ const removeMember = (room, memberId) => {
   }
 
   room.members.delete(memberId);
+  if (room.game?.players?.X === memberId || room.game?.players?.O === memberId) {
+    sanitizeGamePlayers(room);
+  }
   if (room.members.size === 0) {
     scheduleRoomCleanup(room);
   }
@@ -584,6 +675,67 @@ io.on("connection", (socket) => {
     });
 
     callback?.({ ok: true, createdAt: now });
+  });
+
+  socket.on("game:move", (payload, callback) => {
+    const context = getContext(socket, payload?.roomId);
+    if (!context) {
+      callback?.({ ok: false, error: "Room unavailable." });
+      return;
+    }
+
+    const { room, member } = context;
+    const index = Number(payload?.index);
+    if (!Number.isInteger(index) || index < 0 || index > 8) {
+      callback?.({ ok: false, error: "Invalid move." });
+      return;
+    }
+
+    const symbol = assignGameSymbol(room, member.memberId);
+    if (!symbol) {
+      callback?.({ ok: false, error: "Only two players can play this game right now." });
+      return;
+    }
+
+    if (room.game.winner) {
+      callback?.({ ok: false, error: "Game is over. Reset to play again." });
+      return;
+    }
+
+    if (room.game.board[index]) {
+      callback?.({ ok: false, error: "That square is already taken." });
+      return;
+    }
+
+    if (room.game.nextTurn !== symbol) {
+      callback?.({ ok: false, error: `It is ${room.game.nextTurn}'s turn.` });
+      return;
+    }
+
+    room.game.board[index] = symbol;
+    const outcome = getGameOutcome(room.game.board);
+    room.game.winner = outcome.winner;
+    room.game.winningLine = outcome.winningLine;
+    room.game.nextTurn = outcome.winner ? room.game.nextTurn : symbol === "X" ? "O" : "X";
+
+    const serializedRoom = serializeRoom(room);
+    io.to(room.roomId).emit("room:state", serializedRoom);
+    callback?.({ ok: true, room: serializedRoom });
+  });
+
+  socket.on("game:reset", (payload, callback) => {
+    const context = getContext(socket, payload?.roomId);
+    if (!context) {
+      callback?.({ ok: false, error: "Room unavailable." });
+      return;
+    }
+
+    const { room } = context;
+    sanitizeGamePlayers(room);
+
+    const serializedRoom = serializeRoom(room);
+    io.to(room.roomId).emit("room:state", serializedRoom);
+    callback?.({ ok: true, room: serializedRoom });
   });
 
   socket.on("disconnect", () => {

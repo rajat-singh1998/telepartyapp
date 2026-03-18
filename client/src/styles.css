@@ -534,6 +534,7 @@ select {
   position: sticky;
   top: 0.75rem;
   z-index: 4;
+  padding: 0.45rem;
 }
 
 .app-shell.full-view .watch-area,
@@ -716,8 +717,19 @@ select {
   min-height: 0;
 }
 
+.chat-tool-actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
 .sticker-toggle {
   justify-self: start;
+  padding: 0.34rem 0.62rem;
+  font-size: 0.82rem;
+}
+
+.game-toggle {
   padding: 0.34rem 0.62rem;
   font-size: 0.82rem;
 }
@@ -783,6 +795,97 @@ select {
   font-size: 0.72rem;
   line-height: 1.1;
   text-align: center;
+}
+
+.game-panel {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.38rem;
+  border: 1px solid rgba(255, 223, 240, 0.22);
+  border-radius: 12px;
+  background: rgba(90, 30, 75, 0.72);
+}
+
+.game-panel-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: flex-start;
+}
+
+.game-panel-top strong {
+  display: block;
+  color: #fff2fa;
+}
+
+.game-panel-top p {
+  margin: 0.18rem 0 0;
+  font-size: 0.66rem;
+  color: rgba(255, 231, 245, 0.84);
+}
+
+.game-reset {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.68rem;
+}
+
+.game-player-row {
+  display: flex;
+  gap: 0.18rem;
+  flex-wrap: wrap;
+}
+
+.game-player-row span {
+  padding: 0.08rem 0.24rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 223, 240, 0.22);
+  color: rgba(255, 237, 247, 0.82);
+  font-size: 0.58rem;
+}
+
+.game-player-row span.active {
+  border-color: rgba(255, 207, 232, 0.72);
+  background: rgba(255, 108, 184, 0.18);
+  color: #fff5fb;
+}
+
+.tic-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.16rem;
+  width: min(100%, 8.4rem);
+}
+
+.tic-cell {
+  aspect-ratio: 1 / 1;
+  min-height: 1.9rem;
+  border-radius: 8px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0.66rem;
+  font-weight: 700;
+  background: rgba(255, 121, 190, 0.16);
+  border: 1px solid rgba(255, 223, 240, 0.28);
+  box-shadow: none;
+}
+
+.tic-cell:hover {
+  box-shadow: none;
+}
+
+.tic-cell.filled {
+  background: rgba(255, 224, 241, 0.14);
+}
+
+.tic-cell.winning {
+  border-color: rgba(255, 221, 118, 0.8);
+  background: rgba(255, 218, 124, 0.18);
+}
+
+.tic-cell:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .chat-form {
@@ -857,6 +960,7 @@ select {
     position: sticky;
     top: 0;
     z-index: 3;
+    padding: 0.34rem;
   }
 
   .app-shell.keyboard-open {
@@ -909,6 +1013,43 @@ select {
     overflow-y: auto;
     padding-right: 0.12rem;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .game-panel-top {
+    flex-direction: column;
+  }
+
+  .game-panel {
+    gap: 0.22rem;
+    padding: 0.3rem;
+  }
+
+  .game-panel-top p {
+    font-size: 0.6rem;
+  }
+
+  .game-reset {
+    padding: 0.16rem 0.3rem;
+    font-size: 0.6rem;
+  }
+
+  .game-player-row {
+    gap: 0.14rem;
+  }
+
+  .game-player-row span {
+    padding: 0.06rem 0.18rem;
+    font-size: 0.54rem;
+  }
+
+  .tic-board {
+    gap: 0.14rem;
+    width: min(100%, 7.2rem);
+  }
+
+  .tic-cell {
+    min-height: 1.6rem;
+    font-size: 0.58rem;
   }
 
   .media-controls {
