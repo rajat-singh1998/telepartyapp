@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Panda and penguin cuddle">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#d86ea1" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <g transform="translate(8 10)">
+      <circle cx="28" cy="26" r="8" fill="#606570"/>
+      <circle cx="62" cy="26" r="8" fill="#606570"/>
+      <ellipse cx="45" cy="58" rx="26" ry="28" fill="#fffafc" stroke="#676c76" stroke-width="4"/>
+      <ellipse cx="34" cy="50" rx="8" ry="10" fill="#676c76"/>
+      <ellipse cx="56" cy="50" rx="8" ry="10" fill="#676c76"/>
+      <ellipse cx="45" cy="63" rx="4.5" ry="3.5" fill="#676c76"/>
+      <path d="M40 69c2.5 3 7.5 3 10 0" fill="none" stroke="#676c76" stroke-width="3.5" stroke-linecap="round"/>
+      <path d="M61 72c-8-7-18-10-29-10" fill="none" stroke="#676c76" stroke-width="6" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(56 18)">
+      <ellipse cx="28" cy="50" rx="24" ry="29" fill="#565d69"/>
+      <ellipse cx="28" cy="56" rx="16" ry="19" fill="#fffaf4"/>
+      <path d="M18 43c4-4 8-4 12 0" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>
+      <path d="M26 53l6 3-6 3-6-3 6-3Z" fill="#ffcb57"/>
+      <path d="M22 65c3 4 7 4 10 0" fill="none" stroke="#565d69" stroke-width="3.5" stroke-linecap="round"/>
+      <ellipse cx="14" cy="73" rx="7" ry="5" fill="#ffd15e"/>
+      <ellipse cx="41" cy="73" rx="7" ry="5" fill="#ffd15e"/>
+      <ellipse cx="15" cy="59" rx="6" ry="4.2" fill="#ffb7cf"/>
+      <ellipse cx="41" cy="59" rx="6" ry="4.2" fill="#ffb7cf"/>
+    </g>
+    <path d="M89 15c5-7 15-2 14 6-1 4-6 8-14 13-8-5-13-9-14-13-1-8 9-13 14-6Z" fill="#ff9ec2"/>
+    <path d="M104 8c4-5 11-1 10 5-1 3-4 6-10 10-6-4-9-7-10-10-1-6 6-10 10-5Z" fill="#ffc0d7"/>
+  </g>
+</svg>

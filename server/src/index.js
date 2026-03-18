@@ -51,7 +51,6 @@ const generateMemberId = customAlphabet(
 );
 const DISCONNECT_GRACE_MS = Number(process.env.DISCONNECT_GRACE_MS || 45000);
 const BELL_COOLDOWN_MS = Number(process.env.BELL_COOLDOWN_MS || 5000);
-const HEART_RAIN_COOLDOWN_MS = Number(process.env.HEART_RAIN_COOLDOWN_MS || 8000);
 const ROOM_IDLE_TTL_MS = Number(process.env.ROOM_IDLE_TTL_MS || 21600000);
 
 const rooms = new Map();
@@ -100,6 +99,10 @@ const createRoomState = (host) => ({
     lastBurstAt: 0,
     lastBurstBy: host.memberId,
   },
+  kisses: {
+    lastBurstAt: 0,
+    lastBurstBy: host.memberId,
+  },
   roomCleanupTimer: null,
   createdAt: Date.now(),
 });
@@ -138,7 +141,50 @@ const normalizeName = (name, fallback = "Guest") => {
   return safeName.slice(0, 24);
 };
 
-const ALLOWED_STICKERS = new Set(["panda", "penguin"]);
+const ALLOWED_STICKERS = new Set([
+  "panda",
+  "penguin",
+  "panda-love",
+  "panda-blush",
+  "panda-sleepy",
+  "penguin-love",
+  "penguin-blush",
+  "cuddle-heart",
+]);
+const ALLOWED_STICKER_PROVIDERS = new Set(["tenor"]);
+const ALLOWED_STICKER_HOSTS = new Set(["media.tenor.com", "c.tenor.com"]);
+
+const normalizeStickerUrl = (value) => {
+  if (typeof value !== "string") return "";
+  const safe = value.trim();
+  if (!safe || safe.length > 500) return "";
+
+  try {
+    const parsed = new URL(safe);
+    if (parsed.protocol !== "https:") return "";
+    if (!ALLOWED_STICKER_HOSTS.has(parsed.hostname)) return "";
+    return parsed.toString();
+  } catch (_err) {
+    return "";
+  }
+};
+
+const normalizeStickerAsset = (value) => {
+  if (!value || typeof value !== "object") return null;
+  const provider = typeof value.provider === "string" ? value.provider.trim().toLowerCase() : "";
+  if (!ALLOWED_STICKER_PROVIDERS.has(provider)) return null;
+
+  const url = normalizeStickerUrl(value.url);
+  if (!url) return null;
+
+  const previewUrl = normalizeStickerUrl(value.previewUrl) || url;
+  return {
+    provider,
+    label: normalizeName(value.label, "Sticker"),
+    url,
+    previewUrl,
+  };
+};
 
 const normalizeMemberId = (memberId) => {
   if (typeof memberId !== "string") return "";
@@ -435,8 +481,9 @@ io.on("connection", (socket) => {
 
     const messageText = payload?.message?.trim() || "";
     const sticker = ALLOWED_STICKERS.has(payload?.sticker) ? payload.sticker : "";
+    const stickerAsset = normalizeStickerAsset(payload?.stickerAsset);
 
-    if (!messageText && !sticker) {
+    if (!messageText && !sticker && !stickerAsset) {
       callback?.({ ok: false, error: "Message cannot be empty." });
       return;
     }
@@ -446,7 +493,8 @@ io.on("connection", (socket) => {
       sender: member?.name || "Guest",
       text: messageText.slice(0, 500),
       sticker: sticker || null,
-      type: sticker ? "sticker" : "text",
+      stickerAsset: stickerAsset || null,
+      type: sticker || stickerAsset ? "sticker" : "text",
       createdAt: Date.now(),
     };
 
@@ -497,10 +545,6 @@ io.on("connection", (socket) => {
 
     const { room, member } = context;
     const now = Date.now();
-    if (now - room.hearts.lastBurstAt < HEART_RAIN_COOLDOWN_MS) {
-      callback?.({ ok: false, error: "Heart rain is resting for a moment. Try again in a few seconds." });
-      return;
-    }
 
     room.hearts = {
       lastBurstAt: now,
@@ -508,6 +552,31 @@ io.on("connection", (socket) => {
     };
 
     io.to(room.roomId).emit("heart:burst", {
+      roomId: room.roomId,
+      senderId: member.memberId,
+      senderName: member.name,
+      createdAt: now,
+    });
+
+    callback?.({ ok: true, createdAt: now });
+  });
+
+  socket.on("kiss:burst", (payload, callback) => {
+    const context = getContext(socket, payload?.roomId);
+    if (!context) {
+      callback?.({ ok: false, error: "Room unavailable." });
+      return;
+    }
+
+    const { room, member } = context;
+    const now = Date.now();
+
+    room.kisses = {
+      lastBurstAt: now,
+      lastBurstBy: member.memberId,
+    };
+
+    io.to(room.roomId).emit("kiss:burst", {
       roomId: room.roomId,
       senderId: member.memberId,
       senderName: member.name,

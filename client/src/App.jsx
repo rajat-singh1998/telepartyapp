@@ -5,17 +5,33 @@ import { extractYouTubeId } from "./utils/youtube";
 import pandaSticker from "./assets/stickers/panda.svg";
 import penguinSticker from "./assets/stickers/penguin.svg";
 import cuddleMascot from "./assets/stickers/panda-penguin-cuddle.svg";
+import pandaLoveSticker from "./assets/stickers/panda-love.svg";
+import pandaBlushSticker from "./assets/stickers/panda-blush.svg";
+import pandaSleepySticker from "./assets/stickers/panda-sleepy.svg";
+import penguinLoveSticker from "./assets/stickers/penguin-love.svg";
+import penguinBlushSticker from "./assets/stickers/penguin-blush.svg";
+import cuddleHeartSticker from "./assets/stickers/cuddle-heart.svg";
 import bellVoiceUrl from "./assets/sounds/baby-bell-voice.mp3";
 
 const SOCKET_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
+const TENOR_API_KEY = import.meta.env.VITE_TENOR_API_KEY || "";
+const TENOR_CLIENT_KEY = "teleparty-love";
 const SESSION_STORAGE_KEY = "teleparty_session_v1";
 const LOVE_NAME = "Nunu";
 const STICKERS = [
   { key: "panda", label: "Panda", src: pandaSticker },
   { key: "penguin", label: "Penguin", src: penguinSticker },
+  { key: "panda-love", label: "Panda Love", src: pandaLoveSticker },
+  { key: "panda-blush", label: "Blush Panda", src: pandaBlushSticker },
+  { key: "panda-sleepy", label: "Sleepy Panda", src: pandaSleepySticker },
+  { key: "penguin-love", label: "Penguin Love", src: penguinLoveSticker },
+  { key: "penguin-blush", label: "Blush Penguin", src: penguinBlushSticker },
+  { key: "cuddle-heart", label: "Cuddle", src: cuddleHeartSticker },
 ];
+const STICKER_MAP = Object.fromEntries(STICKERS.map((sticker) => [sticker.key, sticker]));
 const BELL_ICON = "\uD83D\uDD14";
 const HEART_ICON = "\u2665";
+const KISS_ICON = "\uD83D\uDC8B";
 const LOVE_PARTICLES = [
   {
     id: "heart-1",
@@ -162,7 +178,7 @@ const socket = io(SOCKET_URL, {
   reconnectionDelay: 800,
   reconnectionDelayMax: 5000,
   timeout: 20000,
-  transports: ["websocket", "polling"],
+  transports: ["polling", "websocket"],
 });
 
 const readStoredSession = () => {
@@ -226,6 +242,54 @@ const normalizeProfileName = (name) => {
   return safe.slice(0, 24);
 };
 
+const getTenorStickerUrl = (mediaFormats = {}) => {
+  const candidates = [
+    "transparentwebp",
+    "webp_transparent",
+    "tinywebp",
+    "webp",
+    "gif",
+    "tinygif",
+    "nanowebp",
+    "nanogif",
+  ];
+
+  for (const key of candidates) {
+    const value = mediaFormats[key]?.url;
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+};
+
+const mapTenorSticker = (item) => {
+  if (!item?.id || !item?.media_formats) return null;
+  const url = getTenorStickerUrl(item.media_formats);
+  if (!url) return null;
+
+  return {
+    id: String(item.id),
+    provider: "tenor",
+    label: String(item.content_description || item.title || "Sticker").slice(0, 40),
+    url,
+    previewUrl:
+      item.media_formats.tinywebp?.url ||
+      item.media_formats.nanowebp?.url ||
+      item.media_formats.tinygif?.url ||
+      url,
+  };
+};
+
+const getHealthUrl = (baseUrl) => {
+  try {
+    return new URL("/health", baseUrl).toString();
+  } catch (_err) {
+    return `${String(baseUrl || "").replace(/\/$/, "")}/health`;
+  }
+};
+
 const getSpecialLoveMessage = (name) => {
   const normalized = String(name || "").trim().toLowerCase();
   if (normalized === "nunu") {
@@ -237,15 +301,17 @@ const getSpecialLoveMessage = (name) => {
   return "";
 };
 
-const createHeartRainParticles = (count = 140) =>
+const createRainParticles = (icon, count = 420, className = "") =>
   Array.from({ length: count }, (_, index) => ({
     id: `${Date.now()}-${index}-${Math.round(Math.random() * 1e6)}`,
+    icon,
+    className,
     left: `${Math.random() * 100}%`,
-    delay: `${Math.random() * 1.15}s`,
-    duration: `${3.3 + Math.random() * 1.8}s`,
-    size: `${0.34 + Math.random() * 0.34}rem`,
-    drift: `${-36 + Math.random() * 72}px`,
-    opacity: (0.5 + Math.random() * 0.45).toFixed(2),
+    delay: `${Math.random() * 0.55}s`,
+    duration: `${5.8 + Math.random() * 0.8}s`,
+    size: `${0.42 + Math.random() * 0.46}rem`,
+    drift: `${-64 + Math.random() * 128}px`,
+    opacity: (0.62 + Math.random() * 0.34).toFixed(2),
     rotate: `${-26 + Math.random() * 52}deg`,
   }));
 
@@ -280,10 +346,16 @@ function App() {
   const bellVoiceAudioRef = useRef(null);
   const speechVoicesRef = useRef([]);
   const soundReadyRef = useRef(false);
+  const wakingServerRef = useRef(false);
+  const lastWakeAttemptRef = useRef(0);
   const [bellCooldownUntil, setBellCooldownUntil] = useState(0);
-  const [heartCooldownUntil, setHeartCooldownUntil] = useState(0);
   const [isSoundReady, setIsSoundReady] = useState(false);
   const [heartRainBursts, setHeartRainBursts] = useState([]);
+  const [kissRainBursts, setKissRainBursts] = useState([]);
+  const [stickerQuery, setStickerQuery] = useState("");
+  const [remoteStickers, setRemoteStickers] = useState([]);
+  const [isRemoteStickersLoading, setIsRemoteStickersLoading] = useState(false);
+  const [remoteStickerError, setRemoteStickerError] = useState("");
   const heartRainTimersRef = useRef([]);
   const specialPopupTimerRef = useRef(null);
 
@@ -291,6 +363,36 @@ function App() {
     if (!session?.playback || !session?.playbackSyncedAt) return null;
     return toComputedPlayback(session.playback, session.playbackSyncedAt);
   }, [session?.playback, session?.playbackSyncedAt, tick]);
+
+  const wakeServerIfNeeded = async ({ force = false } = {}) => {
+    if (typeof window === "undefined") return;
+    if (!/^https?:\/\//i.test(SOCKET_URL) || /localhost|127\.0\.0\.1/i.test(SOCKET_URL)) return;
+    if (wakingServerRef.current) return;
+
+    const now = Date.now();
+    if (!force && now - lastWakeAttemptRef.current < 12000) return;
+
+    wakingServerRef.current = true;
+    lastWakeAttemptRef.current = now;
+    setConnectionLabel((current) => (current === "Connected" ? current : "Waking server..."));
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 55000);
+
+    try {
+      await fetch(getHealthUrl(SOCKET_URL), {
+        method: "GET",
+        cache: "no-store",
+        mode: "cors",
+        signal: controller.signal,
+      });
+    } catch (_err) {
+      // Render free instances may still be waking or the request can be aborted after the timeout.
+    } finally {
+      window.clearTimeout(timeout);
+      wakingServerRef.current = false;
+    }
+  };
 
   const unlockBellAudio = async () => {
     if (typeof window === "undefined") return false;
@@ -383,8 +485,17 @@ function App() {
   );
 
   useEffect(() => {
-    socket.connect();
+    let cancelled = false;
     const manager = socket.io;
+
+    const beginConnection = async () => {
+      await wakeServerIfNeeded({ force: true });
+      if (!cancelled && !socket.connected) {
+        socket.connect();
+      }
+    };
+
+    beginConnection();
 
     const attemptRestore = () => {
       const saved =
@@ -440,6 +551,10 @@ function App() {
     const onConnect = () => {
       setIsConnected(true);
       setConnectionLabel("Connected");
+      setError("");
+      if (!sessionRef.current?.roomId) {
+        setInfo("");
+      }
       attemptRestore();
     };
 
@@ -448,16 +563,24 @@ function App() {
       setConnectionLabel("Reconnecting...");
       if (sessionRef.current?.roomId) {
         setInfo("Connection dropped. Reconnecting automatically...");
+      } else {
+        setInfo("Waking the server. The first connection can take a little time on Render.");
       }
+      void wakeServerIfNeeded();
     };
 
     const onConnectError = () => {
       setIsConnected(false);
-      setConnectionLabel("Connection issue");
+      setConnectionLabel("Reconnecting...");
+      if (!sessionRef.current?.roomId) {
+        setInfo("Waking the server. The first connection can take a little time on Render.");
+      }
+      void wakeServerIfNeeded();
     };
 
     const onReconnectAttempt = () => {
       setConnectionLabel("Reconnecting...");
+      void wakeServerIfNeeded();
     };
 
     const onReconnectFailed = () => {
@@ -521,19 +644,36 @@ function App() {
 
     const onHeartBurst = (payload) => {
       const createdAt = payload?.createdAt || Date.now();
-      setHeartCooldownUntil(createdAt + 8000);
       setInfo(`${payload?.senderName || "Someone"} started a heart shower.`);
 
       const burstId = `${createdAt}-${payload?.senderId || "room"}`;
       setHeartRainBursts((current) => [
         ...current,
-        { id: burstId, particles: createHeartRainParticles() },
+        { id: burstId, particles: createRainParticles(HEART_ICON, 420) },
       ]);
 
       const timer = window.setTimeout(() => {
         setHeartRainBursts((current) => current.filter((burst) => burst.id !== burstId));
         heartRainTimersRef.current = heartRainTimersRef.current.filter((item) => item !== timer);
-      }, 5200);
+      }, 5000);
+
+      heartRainTimersRef.current.push(timer);
+    };
+
+    const onKissBurst = (payload) => {
+      const createdAt = payload?.createdAt || Date.now();
+      setInfo(`${payload?.senderName || "Someone"} started a kisses shower.`);
+
+      const burstId = `${createdAt}-${payload?.senderId || "room"}-kiss`;
+      setKissRainBursts((current) => [
+        ...current,
+        { id: burstId, particles: createRainParticles(KISS_ICON, 420, "kiss-rain-drop") },
+      ]);
+
+      const timer = window.setTimeout(() => {
+        setKissRainBursts((current) => current.filter((burst) => burst.id !== burstId));
+        heartRainTimersRef.current = heartRainTimersRef.current.filter((item) => item !== timer);
+      }, 5000);
 
       heartRainTimersRef.current.push(timer);
     };
@@ -548,8 +688,10 @@ function App() {
     socket.on("chat:new", onChatNew);
     socket.on("bell:rung", onBellRung);
     socket.on("heart:burst", onHeartBurst);
+    socket.on("kiss:burst", onKissBurst);
 
     return () => {
+      cancelled = true;
       heartRainTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       heartRainTimersRef.current = [];
       socket.off("connect", onConnect);
@@ -562,6 +704,7 @@ function App() {
       socket.off("chat:new", onChatNew);
       socket.off("bell:rung", onBellRung);
       socket.off("heart:burst", onHeartBurst);
+      socket.off("kiss:burst", onKissBurst);
       socket.disconnect();
     };
   }, []);
@@ -609,6 +752,65 @@ function App() {
     query.addListener(onChange);
     return () => query.removeListener(onChange);
   }, []);
+
+  useEffect(() => {
+    if (!isStickerPickerOpen) return undefined;
+    if (!TENOR_API_KEY) {
+      setRemoteStickers([]);
+      setRemoteStickerError("");
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const queryText = stickerQuery.trim();
+    const endpoint = queryText
+      ? "https://tenor.googleapis.com/v2/search"
+      : "https://tenor.googleapis.com/v2/featured";
+    const searchParams = new URLSearchParams({
+      key: TENOR_API_KEY,
+      client_key: TENOR_CLIENT_KEY,
+      limit: "8",
+      searchfilter: "sticker",
+      country: "IN",
+      locale: "en_IN",
+    });
+
+    if (queryText) {
+      searchParams.set("q", queryText);
+      searchParams.set("random", "true");
+    }
+
+    const timeout = window.setTimeout(async () => {
+      setIsRemoteStickersLoading(true);
+      setRemoteStickerError("");
+
+      try {
+        const response = await fetch(`${endpoint}?${searchParams.toString()}`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error("Sticker search failed.");
+        }
+
+        const data = await response.json();
+        const items = Array.isArray(data?.results) ? data.results.map(mapTenorSticker).filter(Boolean) : [];
+        setRemoteStickers(items);
+        if (!items.length && queryText) {
+          setRemoteStickerError("No cute stickers found for that search.");
+        }
+      } catch (err) {
+        if (err?.name === "AbortError") return;
+        setRemoteStickerError("Could not load online stickers right now.");
+      } finally {
+        setIsRemoteStickersLoading(false);
+      }
+    }, queryText ? 260 : 0);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [isStickerPickerOpen, stickerQuery]);
 
   useEffect(() => {
     if (!session?.media) return;
@@ -812,15 +1014,25 @@ function App() {
 
   const triggerHeartRain = () => {
     if (!session?.roomId || !ensureConnected()) return;
-    if (Date.now() < heartCooldownUntil) return;
 
     socket.timeout(8000).emit("heart:burst", { roomId: session.roomId }, (err, response) => {
       if (err || !response?.ok) {
         setError(response?.error || "Heart rain could not start right now.");
         return;
       }
-      setHeartCooldownUntil((response?.createdAt || Date.now()) + 8000);
       setInfo("Heart rain sent to the room.");
+    });
+  };
+
+  const triggerKissRain = () => {
+    if (!session?.roomId || !ensureConnected()) return;
+
+    socket.timeout(8000).emit("kiss:burst", { roomId: session.roomId }, (err, response) => {
+      if (err || !response?.ok) {
+        setError(response?.error || "Kisses rain could not start right now.");
+        return;
+      }
+      setInfo("Kisses rain sent to the room.");
     });
   };
 
@@ -1034,6 +1246,31 @@ function App() {
     );
   };
 
+  const sendRemoteSticker = (stickerAsset) => {
+    if (!session?.roomId || !ensureConnected()) return;
+    if (!stickerAsset?.url || stickerAsset.provider !== "tenor") return;
+
+    socket.timeout(8000).emit(
+      "chat:send",
+      {
+        roomId: session.roomId,
+        stickerAsset: {
+          provider: "tenor",
+          label: stickerAsset.label,
+          url: stickerAsset.url,
+          previewUrl: stickerAsset.previewUrl || stickerAsset.url,
+        },
+      },
+      (err, response) => {
+        if (err || !response?.ok) {
+          setError(response?.error || "Sticker failed to send.");
+          return;
+        }
+        setIsStickerPickerOpen(false);
+      }
+    );
+  };
+
   const onYouTubeReady = (event) => {
     playerRef.current = event.target;
   };
@@ -1121,7 +1358,32 @@ function App() {
                 "--rain-rotate": particle.rotate,
               }}
             >
-              {HEART_ICON}
+              {particle.icon}
+            </span>
+          ))
+        )}
+      </div>
+    ) : null;
+
+  const renderKissRain = () =>
+    kissRainBursts.length ? (
+      <div className="kiss-rain-overlay" aria-hidden="true">
+        {kissRainBursts.flatMap((burst) =>
+          burst.particles.map((particle) => (
+            <span
+              key={particle.id}
+              className={`heart-rain-drop ${particle.className || ""}`}
+              style={{
+                "--rain-left": particle.left,
+                "--rain-delay": particle.delay,
+                "--rain-duration": particle.duration,
+                "--rain-size": particle.size,
+                "--rain-drift": particle.drift,
+                "--rain-opacity": particle.opacity,
+                "--rain-rotate": particle.rotate,
+              }}
+            >
+              {particle.icon}
             </span>
           ))
         )}
@@ -1202,13 +1464,14 @@ function App() {
   return (
     <>
       {renderSpecialPopup()}
+      {renderHeartRain()}
+      {renderKissRain()}
       <div
         className={`app-shell ${isFullView ? "full-view" : ""} ${
           isChatComposerFocused ? "keyboard-open" : ""
         }`}
       >
         {!isFullView ? renderLoveBackground() : null}
-        {renderHeartRain()}
         {!isFullView ? renderMascotPictures("compact") : null}
       {!isFullView ? (
         <header className="topbar">
@@ -1234,9 +1497,17 @@ function App() {
             ) : null}
             <button
               type="button"
+              className="secondary kiss-rain-btn"
+              onClick={triggerKissRain}
+              aria-label="Start kisses rain"
+              title="Start kisses rain"
+            >
+              {KISS_ICON}
+            </button>
+            <button
+              type="button"
               className="secondary heart-rain-btn"
               onClick={triggerHeartRain}
-              disabled={Date.now() < heartCooldownUntil}
               aria-label="Start heart rain"
               title="Start heart rain"
             >
@@ -1275,9 +1546,17 @@ function App() {
           ) : null}
           <button
             type="button"
+            className="secondary kiss-rain-btn"
+            onClick={triggerKissRain}
+            aria-label="Start kisses rain"
+            title="Start kisses rain"
+          >
+            {KISS_ICON}
+          </button>
+          <button
+            type="button"
             className="secondary heart-rain-btn"
             onClick={triggerHeartRain}
-            disabled={Date.now() < heartCooldownUntil}
             aria-label="Start heart rain"
             title="Start heart rain"
           >
@@ -1424,11 +1703,11 @@ function App() {
             {(session.messages || []).map((message) => (
               <div className={`message ${message.type === "sticker" ? "sticker-message" : ""}`} key={message.id}>
                 <strong>{message.sender}</strong>
-                {message.sticker ? (
+                {message.sticker || message.stickerAsset ? (
                   <div className="sticker-bubble">
                     <img
-                      src={STICKERS.find((item) => item.key === message.sticker)?.src || pandaSticker}
-                      alt={message.sticker}
+                      src={message.stickerAsset?.url || STICKER_MAP[message.sticker]?.src || pandaSticker}
+                      alt={message.stickerAsset?.label || message.sticker || "Sticker"}
                       className="sticker-image"
                     />
                   </div>
@@ -1447,19 +1726,68 @@ function App() {
               {isStickerPickerOpen ? "Hide Stickers" : "Stickers"}
             </button>
             {isStickerPickerOpen ? (
-              <div className="sticker-picker">
-                {STICKERS.map((sticker) => (
-                  <button
-                    key={sticker.key}
-                    type="button"
-                    className="sticker-btn"
-                    onClick={() => sendSticker(sticker.key)}
-                    title={sticker.label}
-                  >
-                    <img src={sticker.src} alt={sticker.label} className="sticker-thumb" />
-                    <small>{sticker.label}</small>
-                  </button>
-                ))}
+              <div className="sticker-picker-panel">
+                {TENOR_API_KEY ? (
+                  <div className="sticker-search">
+                    <input
+                      type="text"
+                      value={stickerQuery}
+                      onChange={(event) => setStickerQuery(event.target.value)}
+                      placeholder="Search cute online stickers"
+                    />
+                    <small>Online stickers powered by Tenor</small>
+                  </div>
+                ) : (
+                  <p className="sticker-helper">
+                    Add `VITE_TENOR_API_KEY` if you want searchable online stickers too.
+                  </p>
+                )}
+
+                <div className="sticker-section">
+                  <span className="sticker-section-label">Cute Pack</span>
+                  <div className="sticker-picker">
+                    {STICKERS.map((sticker) => (
+                      <button
+                        key={sticker.key}
+                        type="button"
+                        className="sticker-btn"
+                        onClick={() => sendSticker(sticker.key)}
+                        title={sticker.label}
+                      >
+                        <img src={sticker.src} alt={sticker.label} className="sticker-thumb" />
+                        <small>{sticker.label}</small>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {TENOR_API_KEY ? (
+                  <div className="sticker-section">
+                    <span className="sticker-section-label">Tenor Stickers</span>
+                    {isRemoteStickersLoading ? (
+                      <p className="sticker-helper">Loading cute stickers...</p>
+                    ) : remoteStickerError ? (
+                      <p className="sticker-helper">{remoteStickerError}</p>
+                    ) : remoteStickers.length ? (
+                      <div className="sticker-picker">
+                        {remoteStickers.map((sticker) => (
+                          <button
+                            key={sticker.id}
+                            type="button"
+                            className="sticker-btn"
+                            onClick={() => sendRemoteSticker(sticker)}
+                            title={sticker.label}
+                          >
+                            <img src={sticker.previewUrl || sticker.url} alt={sticker.label} className="sticker-thumb" />
+                            <small>{sticker.label}</small>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="sticker-helper">No online stickers yet. Try searching something cute.</p>
+                    )}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

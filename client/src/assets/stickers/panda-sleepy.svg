@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Sleepy panda">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#d86ea1" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <circle cx="38" cy="36" r="10" fill="#5c6170"/>
+    <circle cx="90" cy="36" r="10" fill="#5c6170"/>
+    <ellipse cx="64" cy="71" rx="37" ry="36" fill="#fffafc" stroke="#676c76" stroke-width="4"/>
+    <path d="M42 62c5 3 10 3 15 0" fill="none" stroke="#676c76" stroke-width="4" stroke-linecap="round"/>
+    <path d="M71 62c5 3 10 3 15 0" fill="none" stroke="#676c76" stroke-width="4" stroke-linecap="round"/>
+    <ellipse cx="64" cy="76" rx="6" ry="4.5" fill="#676c76"/>
+    <path d="M57 85c3 4 11 4 14 0" fill="none" stroke="#676c76" stroke-width="4" stroke-linecap="round"/>
+    <ellipse cx="40" cy="96" rx="10" ry="11" fill="#676c76"/>
+    <ellipse cx="88" cy="96" rx="10" ry="11" fill="#676c76"/>
+    <ellipse cx="64" cy="96" rx="16" ry="13" fill="#676c76"/>
+    <path d="M93 29h10l-7 8h8l-10 10" fill="none" stroke="#ff98bf" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
